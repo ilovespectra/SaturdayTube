@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' saturday://app; img-src 'self' saturday://app data:; media-src saturday://app; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' saturday://app">
+  <title>Saturday Tube</title>
+  <link rel="stylesheet" href="saturday://app/styles.css">
+</head>
+<body>
+  <main class="room">
+    <header class="room-header">
+      <div class="room-brand"><span class="brand-mark">ST</span><div><div class="brand-name">SATURDAY TUBE</div><div class="brand-sub">YOUR CARTOON CORNER</div></div></div>
+      <div class="set-status"><i class="status-lamp"></i><span id="status" role="status">READY WHEN YOU ARE</span></div>
+    </header>
+
+    <section id="tvSet" class="tv-set" aria-label="Saturday Tube television">
+      <div class="clear-internals" aria-hidden="true"><img src="saturday://app/assets/materials/chassis-simulation.svg" alt=""></div>
+      <div class="television-face">
+        <section class="picture-cabinet" aria-label="Television picture">
+          <header class="picture-heading">
+            <div><span class="eyebrow">NOW SHOWING</span><div id="mediaTitle" class="media-title">Saturday morning starts here</div></div>
+            <div class="crt-badge"><i></i> <span id="displayBadge">COLOR CRT</span></div>
+          </header>
+          <div class="screen-bezel">
+            <div id="stage" class="stage empty">
+              <video id="video" playsinline preload="metadata" crossorigin="anonymous"></video>
+              <canvas id="picture" aria-label="CRT video picture"></canvas>
+              <div class="glass"></div>
+              <div id="caption" class="caption"></div>
+              <div id="emptyState" class="empty-state"><div class="tv-icon">▶</div><div class="empty-title">A little Saturday magic</div><div class="empty-copy">Choose a video tape from your library or open one above</div></div>
+              <div class="screen-corner"><span id="fileExtensionBadge" class="file-extension-badge" hidden></span></div>
+            </div>
+          </div>
+          <div class="transport under-screen" aria-label="Playback controls">
+            <button id="previousButton" class="transport-key skip-key" type="button" aria-label="Rewind / previous tape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4v16L1 12zM23 4v16L13 12z"/></svg></button>
+            <button id="playButton" class="transport-key play-key" type="button" aria-label="Play or pause">▶ PLAY</button>
+            <button id="nextButton" class="transport-key skip-key" type="button" aria-label="Fast-forward / next tape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 4v16l10-8zM13 4v16l10-8z"/></svg></button>
+            <span id="timeCurrent" class="time">0:00</span>
+            <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Playback position">
+            <span id="timeDuration" class="time">0:00</span>
+            <button id="muteButton" class="transport-key mute-key" type="button" aria-label="Mute or unmute" aria-pressed="false">♫</button>
+          </div>
+        </section>
+
+        <aside class="control-panel" aria-label="Television controls and playlists">
+          <div class="panel-brand"><span class="brand-star">✦</span><div><strong>SATURDAY</strong><small>COLOR TELEVISION</small></div></div>
+          <div class="speaker-grille" aria-hidden="true"></div>
+          <div class="panel-label">PICTURE &amp; SOUND</div>
+          <div class="dial-bank">
+            <div class="dial-control"><span class="dial-name">VOLUME</span><span class="dial-output" id="volumeReadout">82%</span><button id="volume" class="dial" type="button" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="82" aria-valuetext="82 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+            <div class="dial-control"><span class="dial-name">SCANLINES</span><span class="dial-output" id="scanlinesReadout">3%</span><button id="scanlines" class="dial" type="button" role="slider" aria-label="Scanline strength" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+            <div class="dial-control"><span class="dial-name">CURVATURE</span><span class="dial-output" id="curveReadout">3%</span><button id="curve" class="dial" type="button" role="slider" aria-label="Screen curvature" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+          </div>
+          <details class="control-drawer picture-drawer">
+            <summary>PICTURE LAB <span>7 EXTRA DIALS</span></summary>
+            <div class="dial-bank advanced-dials">
+              <div class="dial-control"><span class="dial-name">EDGE BLUR</span><span class="dial-output" id="edgeBlurReadout">0%</span><button id="edgeBlur" class="dial" type="button" role="slider" aria-label="Edge blur" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">HUE</span><span class="dial-output" id="hueReadout">50%</span><button id="hue" class="dial" type="button" role="slider" aria-label="Hue shift" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-valuetext="Neutral hue"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">VHS SCAN</span><span class="dial-output" id="vhsScanReadout">2%</span><button id="vhsScan" class="dial" type="button" role="slider" aria-label="VHS tracking scan" aria-valuemin="0" aria-valuemax="100" aria-valuenow="2" aria-valuetext="2 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">GLITCH</span><span class="dial-output" id="glitchReadout">1%</span><button id="glitch" class="dial" type="button" role="slider" aria-label="Glitch" aria-valuemin="0" aria-valuemax="100" aria-valuenow="1" aria-valuetext="1 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">BROKEN TAPE</span><span class="dial-output" id="brokenTapeReadout">1%</span><button id="brokenTape" class="dial" type="button" role="slider" aria-label="Broken tape" aria-valuemin="0" aria-valuemax="100" aria-valuenow="1" aria-valuetext="1 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">GLOW</span><span class="dial-output" id="glowReadout">2%</span><button id="glow" class="dial" type="button" role="slider" aria-label="Picture glow" aria-valuemin="0" aria-valuemax="100" aria-valuenow="2" aria-valuetext="2 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">GLARE</span><span class="dial-output" id="glareReadout">0%</span><button id="glare" class="dial" type="button" role="slider" aria-label="Screen glare" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+            </div>
+          </details>
+          <details class="control-drawer audio-drawer">
+            <summary>TAPE DECK FX <span id="audioEffectSummary">CLEAN</span></summary>
+            <div class="effect-presets" role="group" aria-label="Audio effect preset">
+              <button type="button" data-audio-effect="clean" aria-pressed="true">CLEAN</button>
+              <button type="button" data-audio-effect="vhs" aria-pressed="false">VHS</button>
+              <button type="button" data-audio-effect="hum" aria-pressed="false">CATHODE HUM</button>
+              <button type="button" data-audio-effect="am" aria-pressed="false">AM RADIO</button>
+              <button type="button" data-audio-effect="lofi" aria-pressed="false">LO-FI</button>
+              <button type="button" data-audio-effect="wow" aria-pressed="false">TAPE WOBBLE</button>
+            </div>
+            <div class="bypass-row"><span>AUDIO FILTER BYPASS</span><button id="audioBypassToggle" class="power-switch" type="button" aria-label="Bypass audio effects" aria-pressed="false"><i></i></button></div>
+            <div class="dial-control fx-amount-control"><span class="dial-name">FX MIX</span><span class="dial-output" id="fxAmountReadout">3%</span><button id="fxAmount" class="dial" type="button" role="slider" aria-label="Audio effect mix" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+          </details>
+          <section class="finish-panel" aria-label="Cabinet finish">
+            <div class="finish-heading"><span>CASE FINISH</span><span>MODEL ST-90</span></div>
+            <div class="finish-options" role="group" aria-label="Choose television finish">
+              <button type="button" data-finish="wood" aria-pressed="true">WOOD</button>
+              <button type="button" data-finish="grey" aria-pressed="false">GREY</button>
+              <button type="button" data-finish="black" aria-pressed="false">BLACK</button>
+              <button type="button" data-finish="clear" aria-pressed="false">CLEAR</button>
+              <button type="button" data-finish="yellow" aria-pressed="false">YELLOW</button>
+              <button type="button" data-finish="red" aria-pressed="false">RED</button>
+              <button type="button" data-finish="green" aria-pressed="false">GREEN</button>
+              <button type="button" data-finish="blue" aria-pressed="false">BLUE</button>
+            </div>
+          </section>
+          <label class="signal-control"><span>PICTURE MODE</span><select id="pictureMode" aria-label="Picture color mode"><option value="color">COLOR</option><option value="lowstim">LOWSTIM</option><option value="bw">B&amp;W</option></select></label>
+          <div class="bypass-row main-bypass"><span>VIDEO FILTER BYPASS</span><button id="videoBypassToggle" class="power-switch" type="button" aria-label="Bypass video effects" aria-pressed="false"><i></i></button></div>
+          <label class="signal-control"><span>DISPLAY TYPE</span><select id="displayMode" aria-label="Video display effect"><option value="crt">CATHODE RAY TUBE</option><option value="rear">REAR PROJECTION</option></select></label>
+          <div class="effect-row"><span><b>TV FILTERS</b><small>GLASS &amp; CABINET</small></span><button id="crtToggle" class="power-switch on" type="button" aria-label="Toggle television filters" aria-pressed="true"><i></i></button></div>
+          <div class="panel-label view-label">FULLSCREEN VIEW</div>
+          <div class="view-modes" role="group" aria-label="Fullscreen modes">
+            <button id="screenOnlyButton" class="view-button" type="button" aria-pressed="false"><span>▣</span><small>SCREEN ONLY</small></button>
+            <button id="tvFullscreenButton" class="view-button" type="button" aria-pressed="false"><span>▣</span><small>WHOLE TV</small></button>
+          </div>
+          <section class="playlist-panel" aria-label="Saved playlists">
+            <header class="playlist-heading"><span>PLAYLIST</span><span id="playlistCount">0 TAPES</span></header>
+            <div class="playlist-tools"><select id="playlistSelect" aria-label="Select playlist"></select><button id="newPlaylistButton" type="button" title="Create a new playlist" aria-label="Create a new playlist">＋</button><button id="deletePlaylistButton" type="button" title="Delete playlist; media files stay on disk" aria-label="Delete this playlist">−</button></div>
+            <input id="playlistName" class="playlist-name" type="text" maxlength="48" aria-label="Playlist name" autocomplete="off">
+            <ol id="playlistItems" class="playlist-items" aria-label="Tapes in this playlist"></ol>
+            <div class="playlist-hint">TAP A TAPE TO PLAY</div>
+          </section>
+          <section class="deck-module" aria-label="Integrated VHS player controls">
+            <header class="deck-module-heading"><span>VIDEO CASSETTE DECK</span><span class="deck-display"><i class="deck-led"></i><span id="deckState">TAPE READY</span></span></header>
+            <div class="deck-insert-row">
+              <button id="openButton" class="cassette-port" type="button" title="Add one or more local video files" aria-label="Insert video tapes: choose one or more local video files">
+                <span class="cassette"><i class="reel reel-left"></i><i class="reel reel-right"></i><i class="tape-window"></i><i class="cassette-label">SATURDAY TUBE</i></span>
+                <span class="slot-line"></span>
+              </button>
+              <button id="libraryButton" class="library-launch" type="button">▤ TAPE LIBRARY</button>
+            </div>
+            <div class="deck-options">
+              <label class="track-control"><span>AUDIO</span><select id="audioTracks" disabled><option>Automatic</option></select></label>
+              <label class="track-control"><span>CAPTIONS</span><select id="subtitleTracks" disabled><option>Off</option></select></label>
+              <button id="subtitleButton" class="subtitle-load" type="button">＋ LOAD SRT / VTT</button>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+    </section>
+  </main>
+
+  <dialog id="libraryDialog" class="library-dialog" aria-labelledby="libraryTitle">
+    <header class="library-titlebar">
+      <div class="library-window-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div><strong id="libraryTitle">SATURDAY TUBE · TAPE LIBRARY</strong><small>LOCAL FILES · TITLE-ONLY INTERNET LOOKUPS</small></div>
+      <button id="libraryCloseButton" class="library-close" type="button" aria-label="Close tape library">×</button>
+    </header>
+    <div class="library-toolbar">
+      <button id="libraryFolderButton" class="library-folder-button" type="button">CHOOSE A FOLDER…</button>
+      <button id="libraryAddFileButton" class="library-folder-button" type="button">ADD FILES…</button>
+      <button id="libraryUpButton" class="library-up-button" type="button" aria-label="Go up one folder" disabled>↑</button>
+      <nav id="libraryBreadcrumbs" class="library-breadcrumbs" aria-label="Current folder"><span>Choose a folder to start your shelves</span></nav>
+      <input id="librarySearch" type="search" placeholder="Find a tape…" aria-label="Search visible tapes" autocomplete="off">
+    </div>
+    <div class="library-reelbar"><span>VIDEO CASSETTES</span><span id="libraryCount">SHELVES EMPTY</span></div>
+    <div id="libraryShelves" class="library-shelves" aria-live="polite">
+      <div class="library-empty"><span class="empty-reel">◉</span><strong>THE SHELVES ARE WAITING</strong><p>Choose a folder on this Mac. Saturday Tube will show its folders and playable files as a little tape shop.</p></div>
+    </div>
+    <footer class="library-footer">
+      <span id="librarySelectionCount">TAP A TAPE TO PLAY · SHIFT-TAP TO QUEUE</span>
+      <div><button id="libraryCancelButton" class="library-cancel" type="button">CLOSE</button><button id="libraryAddButton" class="library-add" type="button" disabled>ADD SELECTED TAPES</button></div>
+    </footer>
+  </dialog>
+  <script src="saturday://app/renderer.js"></script>
+</body>
+</html>

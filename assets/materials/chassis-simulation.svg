@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 650" fill="none" role="img" aria-label="Illustration of television circuit boards, wiring and components">
+  <!-- Original illustrative television internals, drawn for Saturday Tube. -->
+  <g opacity=".84" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M74 106h1052v444H74z" fill="#1d2831" fill-opacity=".68" stroke="#c2f1e5" stroke-opacity=".42" stroke-width="5"/>
+    <path d="M105 142h254v367H105z" fill="#315b4b" fill-opacity=".76" stroke="#d4d2a5" stroke-opacity=".56" stroke-width="4"/>
+    <path d="M386 142h677v367H386z" fill="#2d624b" fill-opacity=".78" stroke="#c1d79f" stroke-opacity=".58" stroke-width="4"/>
+    <g stroke="#d4b765" stroke-opacity=".76" stroke-width="5">
+      <path d="M125 177h93v58h98v-40h32M126 264h74v74h105v-81h37M128 422h83v-58h119M413 183h125v66h77M424 295h102v-45h145v-71h104M415 446h137v-65h84v-87h142M638 479h99v-64h66v-60h86M791 184h81v65h158M890 290h147v79h-70v83h-62"/>
+      <path d="M150 190v63m45 13v62m96 25v47m-95 18v34m166-229v43m46 18h72m51 72v54m143-129v45m54 127h62m15-203v-48m198 69v48m-65 120h73"/>
+    </g>
+    <g fill="#d6a94d" stroke="#f5dd98" stroke-width="3">
+      <circle cx="126" cy="177" r="8"/><circle cx="349" cy="195" r="8"/><circle cx="128" cy="338" r="8"/><circle cx="328" cy="422" r="8"/>
+      <circle cx="413" cy="183" r="8"/><circle cx="759" cy="179" r="8"/><circle cx="1037" cy="184" r="8"/><circle cx="1037" cy="452" r="8"/>
+      <circle cx="553" cy="446" r="8"/><circle cx="844" cy="355" r="8"/>
+    </g>
+    <g stroke="#ced7bb" stroke-width="4">
+      <rect x="157" y="205" width="42" height="30" rx="3" fill="#222c33"/><rect x="238" y="285" width="54" height="38" rx="3" fill="#222c33"/>
+      <rect x="442" y="171" width="54" height="34" rx="3" fill="#25323b"/><rect x="578" y="280" width="72" height="45" rx="4" fill="#20292f"/>
+      <rect x="735" y="335" width="76" height="50" rx="4" fill="#263239"/><rect x="930" y="216" width="68" height="42" rx="4" fill="#222c33"/>
+    </g>
+    <g>
+      <path d="M472 232c29-31 72-31 101 0v70c-29 31-72 31-101 0z" fill="#c98a3e" fill-opacity=".94" stroke="#ffe1a2" stroke-width="5"/>
+      <path d="M486 242c21-21 52-21 73 0v50c-21 21-52 21-73 0z" stroke="#553723" stroke-width="5"/>
+      <path d="M490 249c18-15 46-15 64 0M490 263c18-15 46-15 64 0M490 277c18-15 46-15 64 0" stroke="#f0d18b" stroke-width="4"/>
+    </g>
+    <g>
+      <rect x="677" y="164" width="32" height="94" rx="12" fill="#c46b4b" stroke="#f8c3a0" stroke-width="4"/>
+      <rect x="723" y="161" width="27" height="103" rx="12" fill="#658dae" stroke="#d5edff" stroke-width="4"/>
+      <rect x="858" y="404" width="38" height="77" rx="14" fill="#c9b64f" stroke="#fff0a6" stroke-width="4"/>
+      <path d="M684 174v-13m18 13v-13m27 13v-13m13 13v-13m124 255v-14m18 14v-14" stroke="#e9dfc7" stroke-width="5"/>
+    </g>
+    <g stroke="#e9dcb4" stroke-width="6">
+      <path d="M100 109C50 57 45 32 85 27h184c39 0 44 19 13 40l-62 42"/>
+      <path d="M1078 110c45-44 51-73 10-79h-96c-32 0-41 17-18 37l40 42"/>
+      <path d="M203 548c23 28 52 37 91 37h163"/>
+      <path d="M936 548c-18 28-47 37-83 37h-99"/>
+    </g>
+    <g fill="#d7d7c2" stroke="#363c3d" stroke-width="3">
+      <path d="M314 154h21v48h-21zM321 202h7v35h-7z"/><path d="M368 298h22v55h-22zM376 353h7v29h-7z"/>
+      <path d="M804 154h22v52h-22zM812 206h7v35h-7z"/><path d="M1008 323h23v56h-23zM1017 379h7v30h-7z"/>
+    </g>
+    <g stroke="#e0bd72" stroke-width="3" opacity=".9">
+      <path d="M116 474h208m-208 12h208m-208 12h208"/><path d="M869 156h178m-178 12h178m-178 12h178"/>
+    </g>
+  </g>
+</svg>

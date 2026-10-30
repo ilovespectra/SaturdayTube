@@ -1,0 +1,35 @@
+Saturday Tube bundled FFmpeg decoder
+====================================
+
+FFmpeg release: 8.0
+Target: macOS Apple Silicon (arm64)
+License reported by FFmpeg: GNU LGPL version 2.1 or later
+
+The complete upstream source release is included as
+FFmpeg-8.0-source.tar.xz. Its SHA-256 is:
+b2751fccb6cc4c77708113cd78b561059b6fa904b24162fa0be2d60273d27b8e
+Upstream source: https://ffmpeg.org/releases/ffmpeg-8.0.tar.xz
+The exact license text is included as FFmpeg-LGPLv2.1.txt.
+
+This build disables autodetection, all GPL and version-3 components,
+networking, shared libraries, and unused tools. It enables the AVI
+demuxer, MPEG-4 Part 2 and MP3 decoders, MP4 muxer, AAC encoder,
+Apple VideoToolbox H.264 encoder, and audio resampling filter.
+
+Configure flags:
+--cc=/usr/bin/clang --disable-autodetect --disable-everything
+--disable-gpl --disable-version3 --disable-network --disable-doc
+--disable-debug --disable-ffplay --disable-ffprobe --enable-ffmpeg
+--enable-demuxer=avi --enable-decoder=mpeg4,mp3
+--enable-parser=mpeg4video,mpegaudio --enable-muxer=mp4
+--enable-encoder=aac,h264_videotoolbox --enable-filter=aresample
+--enable-protocol=file --enable-swscale --enable-videotoolbox
+--enable-pthreads --enable-static --disable-shared --quiet
+
+The executable is ad-hoc code-signed. Its only dynamic dependencies are
+macOS system libraries/frameworks (libSystem, VideoToolbox,
+CoreFoundation, CoreMedia, CoreVideo, CoreServices); it has no
+Homebrew or third-party dynamic-library dependency.
+
+FFmpeg executable SHA-256 after code signing:
+8620dfa07fd43d3af70701a76f0efceb3e6a26274dfc60bdb99833d084c5baee
