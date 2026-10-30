@@ -31,8 +31,10 @@ const glareDial = document.querySelector('#glare');
 const fxAmountDial = document.querySelector('#fxAmount');
 const pictureModeSelect = document.querySelector('#pictureMode');
 const displayModeSelect = document.querySelector('#displayMode');
-const videoBypassToggle = document.querySelector('#videoBypassToggle');
+const pictureBypassToggle = document.querySelector('#pictureBypassToggle');
 const audioBypassToggle = document.querySelector('#audioBypassToggle');
+const audioEffectSelect = document.querySelector('#audioEffectSelect');
+const cabinetTintInput = document.querySelector('#cabinetTint');
 const pictureDials = [scanlineDial, curveDial, edgeBlurDial, hueDial, vhsScanDial, glitchDial, brokenTapeDial, glowDial, glareDial];
 const allDials = [videoDial, ...pictureDials, fxAmountDial];
 const playlistSelect = document.querySelector('#playlistSelect');
@@ -42,6 +44,7 @@ const gl = canvas.getContext('webgl', { alpha: false, antialias: false, premulti
 const PLAYLISTS_KEY = 'saturdayTube.playlists.v1';
 const CONTROLS_KEY = 'saturdayTube.controls.v1';
 const METADATA_KEY = 'saturdayTube.metadata.v1';
+const SHELF_KEY = 'saturdayTube.shelf.root.v1';
 const METADATA_TTL = 30 * 24 * 60 * 60 * 1000;
 const libraryDialog = document.querySelector('#libraryDialog');
 const libraryShelves = document.querySelector('#libraryShelves');
@@ -49,13 +52,16 @@ const librarySearch = document.querySelector('#librarySearch');
 const libraryBreadcrumbs = document.querySelector('#libraryBreadcrumbs');
 const libraryUpButton = document.querySelector('#libraryUpButton');
 const libraryAddButton = document.querySelector('#libraryAddButton');
-const audioEffectButtons = Array.from(document.querySelectorAll('[data-audio-effect]'));
+const libraryDestination = document.querySelector('#libraryDestination');
 const finishButtons = Array.from(document.querySelectorAll('[data-finish]'));
 let libraryView = null;
+let shelfRestorePromise = null;
 let librarySelection = new Set();
-let metadataLookupsThisFolder = 0;
 const metadataCache = new Map();
 const metadataRequests = new Map();
+const metadataQueue = [];
+let metadataActiveRequests = 0;
+const METADATA_CONCURRENCY = 3;
 let currentSubtitleTrack = null;
 let externalTrackCount = 0;
 let hasVideo = false;
@@ -66,8 +72,7 @@ let textureHeight = 0;
 let lastUploadedTime = -1;
 let glContextLost = false;
 let pictureFallback = false;
-let tvFiltersEnabled = true;
-let videoFiltersEnabled = true;
+let pictureFiltersEnabled = true;
 let audioFiltersEnabled = true;
 let selectedPictureMode = 'color';
 let displayMode = 'crt';
@@ -87,6 +92,7 @@ let humGain = null;
 let staticGain = null;
 let isMuted = false;
 let currentFinish = 'wood';
+let cabinetTint = '#9b6334';
 let playlists = [];
 let activePlaylistId = '';
 let currentIndex = -1;
@@ -95,6 +101,7 @@ let currentTrackStarted = false;
 let fallbackAttempted = false;
 let playbackGeneration = 0;
 let extensionTimer = null;
+let cursorTimer = null;
 let shuttingOff = false;
 
 const vertexSource = `attribute vec2 p; varying vec2 uv; void main(){ uv=(p+1.0)*0.5; gl_Position=vec4(p,0.0,1.0); }`;
@@ -104,9 +111,9 @@ float hash(float n){return fract(sin(n)*43758.5453);}
 mat3 hueTurn(float a){float c=cos(a),s=sin(a);return mat3(0.213+0.787*c-0.213*s,0.213-0.213*c+0.143*s,0.213-0.213*c-0.787*s,0.715-0.715*c-0.715*s,0.715+0.285*c+0.140*s,0.715-0.715*c+0.715*s,0.072-0.072*c+0.928*s,0.072-0.072*c-0.283*s,0.072+0.928*c+0.072*s);}
 vec3 softSample(vec2 p,float radius){vec2 d=vec2(radius)/resolution;return (texture2D(frame,p).rgb*0.40+texture2D(frame,p+vec2(d.x,0.0)).rgb*0.15+texture2D(frame,p-vec2(d.x,0.0)).rgb*0.15+texture2D(frame,p+vec2(0.0,d.y)).rgb*0.15+texture2D(frame,p-vec2(0.0,d.y)).rgb*0.15);}
 void main(){vec2 q=uv*2.0-1.0;float r2=dot(q,q);if(rearProjection<0.5)q*=1.0+strength*r2;vec2 t=q*0.5+0.5;t.y=1.0-t.y;if(t.x<0.0||t.x>1.0||t.y<0.0||t.y>1.0){gl_FragColor=vec4(0.025,0.03,0.025,1.0);return;}
-float row=floor(t.y*resolution.y/7.0);float twitch=(hash(row+floor(time*19.0))-0.5)*0.006*glitch;float tear=step(0.992,hash(floor(time*14.0)+floor(t.y*23.0)))*glitch*0.012;float tracking=sin(t.y*resolution.y*0.018-time*2.6)*0.001+sin(t.y*resolution.y*0.003-time*0.18)*0.002; t.x=clamp(t.x+twitch+tear+tracking*vhsScan,0.0,1.0);
+float row=floor(t.y*resolution.y/7.0);float twitch=(hash(row+floor(time*19.0))-0.5)*0.006*glitch;float tear=step(0.992,hash(floor(time*14.0)+floor(t.y*23.0)))*glitch*0.012;float eventRate=0.12+vhsScan*0.65;float eventIndex=floor(time*eventRate);float eventPulse=step(0.80,hash(eventIndex+19.0));float bandY=fract(hash(eventIndex+41.0)+time*(0.02+vhsScan*0.20));float bandWidth=0.003+vhsScan*0.003;float triangularBand=max(0.0,1.0-abs(t.y-bandY)/bandWidth);float edgeJitter=(hash(row+eventIndex*3.0)-0.5);float tracking=eventPulse*triangularBand*edgeJitter*(0.008+vhsScan*0.025)*step(0.001,vhsScan);float microJitter=(hash(row+floor(time*(8.0+vhsScan*50.0)))-0.5)*vhsScan*0.0015;t.x=clamp(t.x+twitch+tear+tracking+microJitter,0.0,1.0);
 float edge=smoothstep(0.15,1.15,r2);float blurRadius=edge*edgeBlur*1.2+rearProjection*0.65;float split=0.00015+vhsScan*0.0008+glitch*0.001;vec3 col=softSample(t,blurRadius);col.r=softSample(clamp(t+vec2(split,0.0),0.0,1.0),blurRadius).r;col.b=softSample(clamp(t-vec2(split,0.0),0.0,1.0),blurRadius).b;
-col=hueTurn((hueShift-0.5)*6.28318)*col;float luma=dot(col,vec3(0.299,0.587,0.114));if(pictureMode>1.5)col=vec3(luma);else if(pictureMode>0.5){vec3 warm=vec3(luma*1.04,luma*1.01,luma*0.94);col=mix(col,warm,0.68);col=clamp((col-0.5)*0.82+0.5,0.0,1.0);}float lines=0.985+0.015*sin(t.y*resolution.y*3.14159);col*=mix(1.0,lines,scan);float dropout=step(0.995,hash(floor(t.y*resolution.y/3.0)+floor(time*8.0)))*broken*0.14;float snow=hash(floor(t.x*resolution.x/2.0)+floor(t.y*resolution.y/2.0)+floor(time*35.0))-0.5;col*=1.0-dropout;col+=snow*broken*0.012;vec3 bloom=max(softSample(t,2.0+glow*5.0)-vec3(0.68),vec3(0.0));col+=bloom*glow*0.12;float corner=1.0-0.12*r2;col*=corner;float grille=0.99+0.01*cos(t.x*resolution.x*3.14159);col*=mix(1.0,grille,scan*0.22);if(rearProjection>0.5){col=col*0.88+vec3(0.035,0.03,0.024);col=pow(max(col,vec3(0.0)),vec3(0.96));}float reflection=exp(-length((uv-vec2(0.21,0.18))*vec2(1.15,1.0))*10.0)*glare*0.11;col+=vec3(0.82,0.91,1.0)*reflection;gl_FragColor=vec4(col,1.0);}`;
+col=hueTurn((hueShift-0.5)*6.28318)*col;float luma=dot(col,vec3(0.299,0.587,0.114));if(pictureMode>1.5)col=vec3(luma);else if(pictureMode>0.5){vec3 warm=vec3(luma*1.04,luma*1.01,luma*0.94);col=mix(col,warm,0.68);col=clamp((col-0.5)*0.82+0.5,0.0,1.0);}float lines=0.985+0.015*sin(t.y*resolution.y*3.14159);col*=mix(1.0,lines,scan);float dropout=step(0.995,hash(floor(t.y*resolution.y/3.0)+floor(time*8.0)))*broken*0.14;float snow=hash(floor(t.x*resolution.x/2.0)+floor(t.y*resolution.y/2.0)+floor(time*35.0))-0.5;col*=1.0-dropout;col+=snow*broken*0.012;vec3 bloom=max(softSample(t,2.0+glow*10.0)-vec3(0.62),vec3(0.0));col+=bloom*glow*0.42;float corner=1.0-0.12*r2;col*=corner;float grille=0.99+0.01*cos(t.x*resolution.x*3.14159);col*=mix(1.0,grille,scan*0.22);if(rearProjection>0.5){col=col*0.88+vec3(0.035,0.03,0.024);col=pow(max(col,vec3(0.0)),vec3(0.96));}float reflection=exp(-length((uv-vec2(0.21,0.18))*vec2(1.15,1.0))*10.0)*glare*0.11;col+=vec3(0.82,0.91,1.0)*reflection;gl_FragColor=vec4(col,1.0);}`;
 
 function shader(type, source) {
   const item = gl.createShader(type);
@@ -269,8 +276,7 @@ function ensureAudioGraph() {
 function applyAudioEffect(save = true) {
   const preset = AUDIO_EFFECTS[selectedAudioEffect] || AUDIO_EFFECTS.clean;
   const mix = !audioFiltersEnabled || selectedAudioEffect === 'clean' ? 0 : dialValue(fxAmountDial) / 100 * preset.mix;
-  audioEffectButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.audioEffect === selectedAudioEffect)));
-  document.querySelector('#audioEffectSummary').textContent = preset.label;
+  audioEffectSelect.value = selectedAudioEffect;
   if (effectHighpass) {
     smoothAudioParam(effectHighpass.frequency, preset.highpass);
     smoothAudioParam(effectLowpass.frequency, preset.lowpass);
@@ -289,14 +295,23 @@ function applyAudioEffect(save = true) {
 }
 function setAudioEffect(name, save = true) {
   selectedAudioEffect = Object.hasOwn(AUDIO_EFFECTS, name) ? name : 'clean';
+  audioEffectSelect.value = selectedAudioEffect;
   applyAudioEffect(save);
 }
 function setFinish(name, save = true) {
-  if (!['wood', 'grey', 'black', 'clear', 'yellow', 'red', 'green', 'blue'].includes(name)) return;
+  if (!['wood', 'grey', 'black', 'clear'].includes(name)) return;
   currentFinish = name;
   document.body.dataset.finish = name;
   tvSet.dataset.finish = name;
   finishButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.finish === name)));
+  if (save) saveControlPreferences();
+}
+function setCabinetTint(value, save = true) {
+  if (!/^#[\da-f]{6}$/i.test(String(value || ''))) return;
+  cabinetTint = value.toLowerCase();
+  cabinetTintInput.value = cabinetTint;
+  tvSet.style.setProperty('--cabinet-tint', cabinetTint);
+  document.body.style.setProperty('--cabinet-tint', cabinetTint);
   if (save) saveControlPreferences();
 }
 function saveControlPreferences() {
@@ -305,8 +320,8 @@ function saveControlPreferences() {
       dials: Object.fromEntries(allDials.map(dial => [dial.id, dialValue(dial)])),
       effect: selectedAudioEffect,
       finish: currentFinish,
-      tvFiltersEnabled,
-      videoFiltersEnabled,
+      cabinetTint,
+      pictureFiltersEnabled,
       audioFiltersEnabled,
       pictureMode: selectedPictureMode,
       displayMode,
@@ -322,10 +337,15 @@ function restoreControlPreferences() {
       const value = saved.dials?.[dial.id];
       if (Number.isFinite(value)) setDialValue(dial, value);
     }
-    if (typeof saved.finish === 'string') setFinish(saved.finish, false);
+    const legacyTints = { yellow: '#c49a32', red: '#b54642', green: '#39804d', blue: '#3e6caa' };
+    const legacyFinish = ['yellow', 'red', 'green', 'blue'].includes(saved.finish) ? saved.finish : '';
+    setFinish(legacyFinish ? 'wood' : saved.finish, false);
+    setCabinetTint(saved.cabinetTint || legacyTints[legacyFinish] || cabinetTint, false);
     if (typeof saved.effect === 'string') setAudioEffect(saved.effect, false);
-    if (typeof saved.tvFiltersEnabled === 'boolean') tvFiltersEnabled = saved.tvFiltersEnabled;
-    if (typeof saved.videoFiltersEnabled === 'boolean') videoFiltersEnabled = saved.videoFiltersEnabled;
+    if (typeof saved.pictureFiltersEnabled === 'boolean') pictureFiltersEnabled = saved.pictureFiltersEnabled;
+    else if (typeof saved.videoFiltersEnabled === 'boolean' || typeof saved.tvFiltersEnabled === 'boolean') {
+      pictureFiltersEnabled = saved.videoFiltersEnabled !== false && saved.tvFiltersEnabled !== false;
+    }
     if (typeof saved.audioFiltersEnabled === 'boolean') audioFiltersEnabled = saved.audioFiltersEnabled;
     if (['color', 'lowstim', 'bw'].includes(saved.pictureMode)) selectedPictureMode = saved.pictureMode;
     if (['crt', 'rear'].includes(saved.displayMode)) displayMode = saved.displayMode;
@@ -335,15 +355,13 @@ function restoreControlPreferences() {
   } catch (error) { console.warn('Control preferences could not be restored', error); }
 }
 function syncBypassControls() {
-  videoBypassToggle.classList.toggle('on', !videoFiltersEnabled);
-  videoBypassToggle.setAttribute('aria-pressed', String(!videoFiltersEnabled));
+  pictureBypassToggle.classList.toggle('on', !pictureFiltersEnabled);
+  pictureBypassToggle.setAttribute('aria-pressed', String(!pictureFiltersEnabled));
   audioBypassToggle.classList.toggle('on', !audioFiltersEnabled);
   audioBypassToggle.setAttribute('aria-pressed', String(!audioFiltersEnabled));
-  const tvToggle = document.querySelector('#crtToggle');
-  tvToggle.classList.toggle('on', tvFiltersEnabled);
-  tvToggle.setAttribute('aria-pressed', String(tvFiltersEnabled));
-  const modeLabel = { color: 'COLOR', lowstim: 'LOWSTIM', bw: 'B&W' }[selectedPictureMode] || 'COLOR';
-  document.querySelector('#displayBadge').textContent = `${modeLabel} ${displayMode === 'rear' ? 'REAR PROJECTION' : 'CRT'}`;
+  const modeLabel = pictureFiltersEnabled ? ({ color: 'COLOR', lowstim: 'LOWSTIM', bw: 'B&W' }[selectedPictureMode] || 'COLOR') : 'COLOR';
+  const outputMode = pictureFiltersEnabled ? displayMode : 'crt';
+  document.querySelector('#displayBadge').textContent = `${modeLabel} ${outputMode === 'rear' ? 'REAR PROJECTION' : 'CRT'}`;
 }
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '';
@@ -369,42 +387,65 @@ function restoreMetadataCache() {
     }
   } catch (error) { console.warn('Local metadata cache could not be read', error); }
 }
-function renderMetadata(note, metadata, fallback = '') {
+function renderMetadata(note, metadata, fallback = '', cover = null, cassette = null) {
   if (metadata) {
     note.textContent = [metadata.title, metadata.year].filter(Boolean).join(' · ');
     note.title = [metadata.detail, metadata.source].filter(Boolean).join(' — ');
   } else {
     note.textContent = fallback;
   }
+  if (!cover || !cassette) return;
+  let safeImage = '';
+  try {
+    const parsed = new URL(metadata?.image || '');
+    if (parsed.protocol === 'https:' && ['static.tvmaze.com', 'upload.wikimedia.org'].includes(parsed.hostname)) safeImage = parsed.href;
+  } catch { /* A missing or invalid image leaves the honest VHS illustration in place. */ }
+  if (safeImage) {
+    cover.alt = `${metadata.title || 'Movie'} cover`;
+    cover.src = safeImage;
+    cover.hidden = false;
+    cassette.hidden = true;
+  } else {
+    cover.removeAttribute('src');
+    cover.hidden = true;
+    cassette.hidden = false;
+  }
 }
-function lookupLibraryMetadata(item, note) {
+function pumpMetadataQueue() {
+  while (metadataActiveRequests < METADATA_CONCURRENCY && metadataQueue.length) {
+    const job = metadataQueue.shift();
+    metadataActiveRequests += 1;
+    window.tube.lookupMetadata(job.filename).catch(error => {
+      console.warn('Internet metadata lookup failed', error);
+      return null;
+    }).then(metadata => {
+      metadataCache.set(job.key, { at: Date.now(), value: metadata });
+      if (metadataCache.size > 500) metadataCache.delete(metadataCache.keys().next().value);
+      saveMetadataCache();
+      if (job.note.isConnected) renderMetadata(job.note, metadata, metadata ? '' : 'NO MATCH · FILE NAME RETAINED', job.cover, job.cassette);
+      job.resolve(metadata);
+    }).finally(() => {
+      metadataRequests.delete(job.key);
+      metadataActiveRequests -= 1;
+      pumpMetadataQueue();
+    });
+  }
+}
+function lookupLibraryMetadata(item, note, cover, cassette) {
   const key = metadataKey(item.name);
   if (!key || key.length < 2) return;
   const cached = metadataCache.get(key);
   if (cached && Date.now() - cached.at < METADATA_TTL) {
-    renderMetadata(note, cached.value, cached.value ? '' : 'NO MATCH · FILE NAME RETAINED');
+    renderMetadata(note, cached.value, cached.value ? '' : 'NO MATCH · FILE NAME RETAINED', cover, cassette);
     return;
   }
   if (metadataRequests.has(key)) {
-    metadataRequests.get(key).then(metadata => { if (note.isConnected) renderMetadata(note, metadata, metadata ? '' : 'NO MATCH · FILE NAME RETAINED'); });
+    metadataRequests.get(key).then(metadata => { if (note.isConnected) renderMetadata(note, metadata, metadata ? '' : 'NO MATCH · FILE NAME RETAINED', cover, cassette); });
     return;
   }
-  if (metadataLookupsThisFolder >= 24) {
-    note.textContent = 'FILE NAME RETAINED';
-    return;
-  }
-  metadataLookupsThisFolder += 1;
-  const request = window.tube.lookupMetadata(item.name).catch(error => {
-    console.warn('Internet metadata lookup failed', error);
-    return null;
-  }).then(metadata => {
-    metadataCache.set(key, { at: Date.now(), value: metadata });
-    if (metadataCache.size > 500) metadataCache.delete(metadataCache.keys().next().value);
-    saveMetadataCache();
-    if (note.isConnected) renderMetadata(note, metadata, metadata ? '' : 'NO MATCH · FILE NAME RETAINED');
-    return metadata;
-  }).finally(() => metadataRequests.delete(key));
+  const request = new Promise(resolve => metadataQueue.push({ key, filename: item.name, note, cover, cassette, resolve }));
   metadataRequests.set(key, request);
+  pumpMetadataQueue();
 }
 function libraryEmpty(title, detail) {
   const empty = document.createElement('div');
@@ -487,6 +528,11 @@ function makeLibraryCard(item, folder = false) {
   const cassetteLabel = document.createElement('b');
   cassetteLabel.textContent = 'VHS VIDEO';
   cassette.append(reels, reelsRight, cassetteLabel);
+  const cover = document.createElement('img');
+  cover.className = 'library-cover';
+  cover.loading = 'lazy';
+  cover.hidden = true;
+  cover.addEventListener('error', () => { cover.hidden = true; cover.removeAttribute('src'); cassette.hidden = false; });
   const name = document.createElement('strong');
   name.className = 'library-tape-name';
   name.textContent = item.name;
@@ -495,7 +541,7 @@ function makeLibraryCard(item, folder = false) {
   const metadata = document.createElement('span');
   metadata.className = 'library-metadata';
   metadata.textContent = 'LOOKING UP TITLE…';
-  card.append(cassette, name, note, metadata);
+  card.append(cassette, cover, name, note, metadata);
   card.setAttribute('aria-pressed', String(librarySelection.has(item.path)));
   card.addEventListener('click', event => {
     if (event.shiftKey) {
@@ -506,7 +552,7 @@ function makeLibraryCard(item, folder = false) {
     }
     playLibraryTape(item);
   });
-  lookupLibraryMetadata(item, metadata);
+  lookupLibraryMetadata(item, metadata, cover, cassette);
   return card;
 }
 function addLibraryShelf(title, items, folder = false) {
@@ -522,14 +568,18 @@ function addLibraryShelf(title, items, folder = false) {
   libraryShelves.append(section);
 }
 function renderLibrary() {
-  metadataLookupsThisFolder = 0;
   drawLibraryBreadcrumbs();
   if (!libraryView) {
+    libraryDestination.textContent = 'SHELF NOT SET · IMPORTS COPY HERE';
+    libraryDestination.title = 'Set a local shelf destination before importing tapes.';
     document.querySelector('#libraryCount').textContent = 'SHELVES EMPTY';
-    libraryEmpty('THE SHELVES ARE WAITING', 'Choose a folder on this Mac. Saturday Tube will display playable videos as VHS tapes on your shelves.');
+    libraryEmpty('THE SHELVES ARE WAITING', 'Set a destination on this Mac. Imports are safely copied there and stay on your shelf after restart.');
     updateLibrarySelection();
     return;
   }
+  const rootLabel = libraryView.root.split('/').filter(Boolean).at(-1) || 'LOCAL SHELF';
+  libraryDestination.textContent = `SHELF: ${rootLabel} · IMPORTS COPY HERE`;
+  libraryDestination.title = libraryView.root;
   const query = librarySearch.value.trim().toLocaleLowerCase();
   const directories = libraryView.directories.filter(item => item.name.toLocaleLowerCase().includes(query));
   const files = libraryView.files.filter(item => item.name.toLocaleLowerCase().includes(query));
@@ -539,7 +589,7 @@ function renderLibrary() {
   addLibraryShelf('FOLDERS · OPEN A SHELF', directories, true);
   addLibraryShelf('TAPES · SELECT ONE OR MORE', files);
   if (!directories.length && !files.length) {
-    libraryEmpty(query ? 'NO MATCHING TAPES' : 'NO PLAYABLE TAPES ON THIS SHELF', query ? 'Try another title or clear the search.' : 'Choose another folder, or add a video with the deck slot.');
+    libraryEmpty(query ? 'NO MATCHING TAPES' : 'NO PLAYABLE TAPES ON THIS SHELF', query ? 'Try another title or clear the search.' : 'Import tapes here, or choose a subfolder to browse.');
   }
   updateLibrarySelection();
 }
@@ -559,6 +609,7 @@ async function chooseLibraryFolder() {
   try {
     const root = await window.tube.chooseLibraryFolder();
     if (!root) return;
+    localStorage.setItem(SHELF_KEY, root);
     librarySelection.clear();
     librarySearch.value = '';
     await loadLibraryFolder(root);
@@ -567,10 +618,47 @@ async function chooseLibraryFolder() {
     libraryEmpty('FOLDER ACCESS FAILED', error.message || 'Try choosing the folder again.');
   }
 }
-function openLibrary() {
+async function restoreShelfRoot() {
+  const savedRoot = localStorage.getItem(SHELF_KEY);
+  if (!savedRoot) return;
+  try {
+    const root = await window.tube.restoreLibraryFolder(savedRoot);
+    if (!root) throw new Error('The saved shelf is unavailable. Reconnect its drive or choose another destination.');
+    await loadLibraryFolder(root);
+  } catch (error) {
+    console.warn('Saved local shelf is not currently available', error);
+    libraryView = null;
+    renderLibrary();
+    setStatus('SHELF NEEDS RECONNECTING');
+  }
+}
+async function openLibrary() {
   if (!libraryDialog.open) libraryDialog.showModal();
+  if (shelfRestorePromise) await shelfRestorePromise;
   renderLibrary();
   librarySearch.focus();
+}
+async function importTapesToShelf() {
+  if (!libraryView?.root) {
+    setStatus('SET A SHELF DESTINATION FIRST');
+    libraryEmpty('CHOOSE A SHELF DESTINATION', 'Set a local folder first. Files you import will be copied there without replacing existing files.');
+    return;
+  }
+  try {
+    const result = await window.tube.importLibraryFiles();
+    if (!result || !result.files?.length) {
+      if (result?.failed?.length) setStatus('SOME TAPES COULD NOT BE COPIED');
+      return;
+    }
+    librarySelection.clear();
+    await loadLibraryFolder(libraryView.root);
+    const count = result.files.length;
+    const detail = result.failed?.length ? ` · ${result.failed.length} SKIPPED` : '';
+    setStatus(`${count} TAPE${count === 1 ? '' : 'S'} COPIED TO SHELF${detail}`);
+  } catch (error) {
+    console.error('Selected videos could not be copied to the local shelf', error);
+    setStatus(String(error?.message || 'IMPORT FAILED').slice(0, 70));
+  }
 }
 async function playLibraryTape(item) {
   try {
@@ -689,9 +777,9 @@ function frameLoop(now) {
   gl.uniform1i(gl.getUniformLocation(glProgram, 'frame'), 0);
   gl.uniform2f(gl.getUniformLocation(glProgram, 'resolution'), width, height);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'time'), now / 1000);
-  const isCRT = tvFiltersEnabled && displayMode === 'crt';
-  const tvScale = tvFiltersEnabled ? 1 : 0;
-  const videoScale = videoFiltersEnabled ? 1 : 0;
+  const isCRT = pictureFiltersEnabled && displayMode === 'crt';
+  const tvScale = pictureFiltersEnabled ? 1 : 0;
+  const videoScale = pictureFiltersEnabled ? 1 : 0;
   gl.uniform1f(gl.getUniformLocation(glProgram, 'strength'), isCRT ? dialValue(curveDial) / 100 * 0.075 : 0.0);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'scan'), isCRT ? dialValue(scanlineDial) / 100 : 0.0);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'edgeBlur'), tvScale * dialValue(edgeBlurDial) / 100);
@@ -702,7 +790,7 @@ function frameLoop(now) {
   gl.uniform1f(gl.getUniformLocation(glProgram, 'glow'), tvScale * dialValue(glowDial) / 100);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'glare'), tvScale * dialValue(glareDial) / 100);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'pictureMode'), videoScale ? ({ color: 0, lowstim: 1, bw: 2 }[selectedPictureMode] || 0) : 0);
-  gl.uniform1f(gl.getUniformLocation(glProgram, 'rearProjection'), tvFiltersEnabled && displayMode === 'rear' ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'rearProjection'), pictureFiltersEnabled && displayMode === 'rear' ? 1 : 0);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
@@ -772,6 +860,20 @@ function hideFileExtension() {
   extensionBadge.hidden = true;
   extensionBadge.textContent = '';
 }
+function showPlaybackCursor() {
+  if (cursorTimer) clearTimeout(cursorTimer);
+  cursorTimer = null;
+  document.body.classList.remove('cursor-idle');
+  if (!hasVideo || video.paused || libraryDialog.open) return;
+  cursorTimer = setTimeout(() => {
+    if (hasVideo && !video.paused && !libraryDialog.open) document.body.classList.add('cursor-idle');
+  }, 1200);
+}
+function clearPlaybackCursor() {
+  if (cursorTimer) clearTimeout(cursorTimer);
+  cursorTimer = null;
+  document.body.classList.remove('cursor-idle');
+}
 function showFileExtension() {
   const track = activePlaylist()?.tracks[currentIndex];
   const fileName = track?.path?.split(/[\\/]/).pop() || track?.title || '';
@@ -780,7 +882,7 @@ function showFileExtension() {
   if (extensionTimer) clearTimeout(extensionTimer);
   extensionBadge.textContent = match[1].toUpperCase();
   extensionBadge.hidden = false;
-  extensionTimer = setTimeout(hideFileExtension, 2300);
+  extensionTimer = setTimeout(hideFileExtension, 2000);
 }
 function findNextPlayableTrack(startIndex) {
   const list = activePlaylist();
@@ -804,6 +906,7 @@ function shutOffPicture() {
   if (shuttingOff) return;
   shuttingOff = true;
   currentTrackStarted = false;
+  clearPlaybackCursor();
   hideFileExtension();
   lastCompositePaused = null;
   stage.classList.add('shutting-off');
@@ -812,6 +915,7 @@ function shutOffPicture() {
 }
 function clearPlayback() {
   video.pause();
+  clearPlaybackCursor();
   shuttingOff = false;
   currentTrackStarted = false;
   hideFileExtension();
@@ -934,21 +1038,6 @@ async function loadPlaylists() {
   }
   persistPlaylists();
   renderPlaylist();
-}
-async function addVideos() {
-  try {
-    const selected = await window.tube.openVideos();
-    if (!selected || !selected.length) return;
-    let list = activePlaylist();
-    if (!list) { createPlaylist(); list = activePlaylist(); }
-    list.tracks.push(...selected.map(item => ({ ...item, unavailable: false })));
-    persistPlaylists();
-    renderPlaylist();
-    const firstAdded = Math.max(0, list.tracks.length - selected.length);
-    if (!hasVideo) playTrack(firstAdded);
-    else setStatus(`${selected.length} TAPE${selected.length === 1 ? '' : 'S'} ADDED`);
-    if (libraryDialog.open) libraryDialog.close();
-  } catch (error) { setStatus('COULD NOT ADD VIDEOS'); console.error(error); }
 }
 function stepTrack(direction) {
   const list = activePlaylist();
@@ -1135,8 +1224,7 @@ playlistName.addEventListener('blur', () => {
   persistPlaylists();
 });
 document.querySelector('#openButton').addEventListener('click', openLibrary);
-document.querySelector('#libraryAddFileButton').addEventListener('click', addVideos);
-document.querySelector('#libraryButton').addEventListener('click', openLibrary);
+document.querySelector('#libraryAddFileButton').addEventListener('click', importTapesToShelf);
 document.querySelector('#libraryCloseButton').addEventListener('click', () => libraryDialog.close());
 document.querySelector('#libraryCancelButton').addEventListener('click', () => libraryDialog.close());
 document.querySelector('#libraryFolderButton').addEventListener('click', chooseLibraryFolder);
@@ -1158,6 +1246,7 @@ document.querySelector('#nextButton').addEventListener('click', () => stepTrack(
 video.addEventListener('play', () => {
   if (shuttingOff) { shuttingOff = false; stage.classList.remove('shutting-off'); }
   if (!currentTrackStarted) { showFileExtension(); currentTrackStarted = true; }
+  showPlaybackCursor();
   lastCompositePaused = null;
   if (audioContext?.state === 'suspended') audioContext.resume().catch(error => console.warn('Audio context resume was deferred', error));
   playButton.textContent = 'Ⅱ PAUSE';
@@ -1166,6 +1255,7 @@ video.addEventListener('play', () => {
   applyAudioEffect(false);
 });
 video.addEventListener('pause', () => {
+  clearPlaybackCursor();
   lastCompositePaused = null;
   playButton.textContent = '▶ PLAY';
   applyAudioEffect(false);
@@ -1243,7 +1333,7 @@ bindRotaryDial(fxAmountDial, () => applyAudioEffect());
 restoreControlPreferences();
 for (const dial of allDials) updateDial(dial);
 setMasterVolume();
-audioEffectButtons.forEach(button => button.addEventListener('click', () => setAudioEffect(button.dataset.audioEffect)));
+audioEffectSelect.addEventListener('change', () => setAudioEffect(audioEffectSelect.value));
 finishButtons.forEach(button => button.addEventListener('click', () => setFinish(button.dataset.finish)));
 document.querySelector('#muteButton').addEventListener('click', event => {
   isMuted = !isMuted;
@@ -1261,13 +1351,8 @@ document.addEventListener('fullscreenchange', () => {
   canvas.width = 0;
   canvas.height = 0;
 });
-document.querySelector('#crtToggle').addEventListener('click', () => {
-  tvFiltersEnabled = !tvFiltersEnabled;
-  syncBypassControls();
-  saveControlPreferences();
-});
-videoBypassToggle.addEventListener('click', () => {
-  videoFiltersEnabled = !videoFiltersEnabled;
+pictureBypassToggle.addEventListener('click', () => {
+  pictureFiltersEnabled = !pictureFiltersEnabled;
   syncBypassControls();
   saveControlPreferences();
 });
@@ -1278,20 +1363,26 @@ audioBypassToggle.addEventListener('click', () => {
 });
 pictureModeSelect.addEventListener('change', () => {
   selectedPictureMode = ['color', 'lowstim', 'bw'].includes(pictureModeSelect.value) ? pictureModeSelect.value : 'color';
+  syncBypassControls();
   saveControlPreferences();
 });
 displayModeSelect.addEventListener('change', () => {
   displayMode = ['crt', 'rear'].includes(displayModeSelect.value) ? displayModeSelect.value : 'crt';
+  syncBypassControls();
   saveControlPreferences();
 });
+cabinetTintInput.addEventListener('input', () => setCabinetTint(cabinetTintInput.value));
+
 document.addEventListener('keydown', event => {
+  showPlaybackCursor();
   if (event.target.matches('input,select,button')) return;
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') { event.preventDefault(); addVideos(); }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') { event.preventDefault(); openLibrary(); }
   else if (event.code === 'Space' && hasVideo) { event.preventDefault(); video.paused ? video.play().catch(() => {}) : video.pause(); }
   else if (event.key === 'ArrowLeft') video.currentTime = Math.max(0, video.currentTime - 5);
   else if (event.key === 'ArrowRight') video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 5);
 });
 restoreMetadataCache();
+shelfRestorePromise = restoreShelfRoot();
 loadPlaylists().catch(error => { console.error(error); renderPlaylist(); });
 canvas.addEventListener('webglcontextlost', event => {
   event.preventDefault();
@@ -1317,4 +1408,7 @@ try {
   console.error('CRT shader setup failed; using the 2D picture fallback', error);
   setPictureFallback(true);
 }
+document.addEventListener('pointermove', showPlaybackCursor, { passive: true });
+document.addEventListener('pointerdown', showPlaybackCursor, { passive: true });
+libraryDialog.addEventListener('close', showPlaybackCursor);
 requestAnimationFrame(frameLoop);

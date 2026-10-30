@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { Readable } = require('node:stream');
 const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const { copyFileIntoShelf } = require('./shelf-storage.cjs');
 
 app.setName(process.env.SATURDAY_TUBE_QA === '1' ? 'Saturday Tube QA' : app.isPackaged ? 'Saturday Tube Candidate' : 'Saturday Tube Dev');
 
@@ -183,6 +184,7 @@ async function lookupMetadata(_event, filename) {
         year: show.premiered?.slice(0, 4) || '',
         kind: show.type || 'TV',
         detail: stripMarkup(show.summary).slice(0, 260),
+        image: show.image?.medium || show.image?.original || '',
         url: show.url || '',
         source: 'TVmaze'
       };
@@ -201,11 +203,21 @@ async function lookupMetadata(_event, filename) {
       return (title === normalized || title.includes(normalized)) && yearMatches;
     });
     if (!page) return null;
+    let image = page.thumbnail?.source || page.thumbnail?.url || '';
+    if (!image && page.key) {
+      try {
+        const summary = await fetchMetadataJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page.key)}`);
+        image = summary.thumbnail?.source || summary.originalimage?.source || '';
+      } catch (error) {
+        console.warn('Wikipedia cover lookup was unavailable', error?.message || error);
+      }
+    }
     return {
       title: page.title || query,
       year: year || ((String(page.description || '').match(/\b(?:19|20)\d{2}\b/) || [])[0] || ''),
       kind: 'Reference',
       detail: stripMarkup(page.description || page.excerpt).slice(0, 260),
+      image,
       url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(page.key || page.title).replace(/ /g, '_'))}`,
       source: 'Wikipedia'
     };
@@ -215,20 +227,6 @@ async function lookupMetadata(_event, filename) {
   }
 }
 
-async function openVideos() {
-  const result = await dialog.showOpenDialog({
-    title: 'Add videos to your Saturday Tube playlist',
-    buttonLabel: 'Add selected videos',
-    properties: ['openFile', 'multiSelections'],
-    filters: [
-      { name: 'Video and audio', extensions: Object.keys(mimeByExt).map(ext => ext.slice(1)) },
-      { name: 'All files', extensions: ['*'] }
-    ]
-  });
-  if (result.canceled || !result.filePaths.length) return [];
-  return result.filePaths.map(registerMediaFile);
-}
-
 function insideLibraryRoot(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
@@ -236,12 +234,23 @@ function insideLibraryRoot(root, candidate) {
 
 async function chooseLibraryFolder(event) {
   const result = await dialog.showOpenDialog({
-    title: 'Choose a folder for your Saturday Tube tape shelves',
-    buttonLabel: 'Browse this folder',
+    title: 'Choose where Saturday Tube should keep imported tapes',
+    buttonLabel: 'Use this shelf folder',
     properties: ['openDirectory', 'createDirectory']
   });
   if (result.canceled || !result.filePaths[0]) return null;
   const root = await fs.promises.realpath(result.filePaths[0]);
+  const stat = await fs.promises.stat(root);
+  if (!stat.isDirectory()) throw new Error('Choose a folder for your local tape shelf.');
+  libraryRoots.set(event.sender.id, root);
+  return root;
+}
+
+async function restoreLibraryFolder(event, requestedRoot) {
+  if (typeof requestedRoot !== 'string' || !path.isAbsolute(requestedRoot)) throw new Error('The saved shelf path is invalid.');
+  const root = await fs.promises.realpath(requestedRoot);
+  const stat = await fs.promises.stat(root);
+  if (!stat.isDirectory()) throw new Error('The saved shelf is no longer a folder.');
   libraryRoots.set(event.sender.id, root);
   return root;
 }
@@ -285,6 +294,43 @@ async function openLibraryFiles(event, paths) {
     } catch { /* A removable drive or file may have disappeared while the shelf was open. */ }
   }
   return found;
+}
+
+async function importLibraryFiles(event) {
+  const root = libraryRoots.get(event.sender.id);
+  if (!root) throw new Error('Set a local shelf destination before importing tapes.');
+  const result = await dialog.showOpenDialog({
+    title: 'Choose videos to copy onto your Saturday Tube shelf',
+    buttonLabel: 'Copy to shelf',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Video and audio', extensions: Object.keys(mimeByExt).map(ext => ext.slice(1)) },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled || !result.filePaths.length) return { files: [], copied: 0, alreadyOnShelf: 0, failed: [] };
+  const files = [];
+  const failed = [];
+  let copied = 0;
+  let alreadyOnShelf = 0;
+  for (const selectedPath of result.filePaths) {
+    try {
+      const source = await fs.promises.realpath(selectedPath);
+      const stat = await fs.promises.stat(source);
+      if (!stat.isFile() || !Object.hasOwn(mimeByExt, path.extname(source).toLowerCase())) {
+        failed.push(path.basename(selectedPath));
+        continue;
+      }
+      const stored = await copyFileIntoShelf(source, root);
+      if (stored.copied) copied += 1;
+      else alreadyOnShelf += 1;
+      files.push(registerMediaFile(stored.path));
+    } catch (error) {
+      console.warn('A selected video could not be copied to the local shelf', error?.message || error);
+      failed.push(path.basename(selectedPath));
+    }
+  }
+  return { files, copied, alreadyOnShelf, failed };
 }
 
 function ffmpegExecutable() {
@@ -477,13 +523,13 @@ app.whenReady().then(() => {
       return new Response('The selected local file could not be read.', { status: 500, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
   });
-  ipcMain.handle('open-videos', openVideos);
-  ipcMain.handle('open-video', async () => (await openVideos())[0] || null);
   ipcMain.handle('restore-videos', (_event, paths) => restoreVideos(paths));
   ipcMain.handle('transcode-media', transcodeMedia);
   ipcMain.handle('choose-library-folder', chooseLibraryFolder);
+  ipcMain.handle('restore-library-folder', restoreLibraryFolder);
   ipcMain.handle('browse-library-folder', (event, folderPath) => browseLibraryFolder(event, folderPath));
   ipcMain.handle('open-library-files', openLibraryFiles);
+  ipcMain.handle('import-library-files', importLibraryFiles);
   ipcMain.handle('lookup-metadata', lookupMetadata);
   ipcMain.handle('open-subtitle', openSubtitle);
   createWindow();

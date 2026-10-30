@@ -9,9 +9,11 @@ const renderer = readFileSync(path.join(root, 'renderer.js'), 'utf8');
 const css = readFileSync(path.join(root, 'styles.css'), 'utf8');
 const main = readFileSync(path.join(root, 'main.cjs'), 'utf8');
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+const preload = readFileSync(path.join(root, 'preload.cjs'), 'utf8');
+const shelfStorage = readFileSync(path.join(root, 'shelf-storage.cjs'), 'utf8');
 
 test('Picture Lab exposes seven adjustable effects including Glow and Glare', () => {
-  assert.match(html, /PICTURE LAB <span>7 EXTRA DIALS<\/span>/);
+  assert.match(html, /<span>PICTURE LAB<\/span><span>7 DIALS<\/span>/);
   for (const dial of ['edgeBlur', 'hue', 'vhsScan', 'glitch', 'brokenTape', 'glow', 'glare']) {
     assert.match(html, new RegExp(`id="${dial}"`));
     assert.match(renderer, new RegExp(`document\\.querySelector\\('#${dial}'\\)`));
@@ -19,23 +21,22 @@ test('Picture Lab exposes seven adjustable effects including Glow and Glare', ()
   assert.match(renderer, /const pictureDials = \[scanlineDial, curveDial, edgeBlurDial, hueDial, vhsScanDial, glitchDial, brokenTapeDial, glowDial, glareDial\]/);
   assert.match(renderer, /uniform float glow/);
   assert.match(renderer, /uniform float glare/);
-  assert.match(renderer, /col\+=bloom\*glow\*0\.12/);
+  assert.match(renderer, /col\+=bloom\*glow\*0\.42/);
   assert.match(renderer, /getUniformLocation\(glProgram, 'glow'\)/);
   assert.match(renderer, /Object\.fromEntries\(allDials\.map/);
 });
 
 test('all cabinet finishes carry through the television hardware', () => {
-  const finishes = ['wood', 'grey', 'black', 'clear', 'yellow', 'red', 'green', 'blue'];
+  const finishes = ['wood', 'grey', 'black', 'clear'];
   for (const finish of finishes) {
     assert.match(html, new RegExp(`data-finish="${finish}"`));
     assert.match(renderer, new RegExp(`'${finish}'`));
   }
-  for (const finish of ['yellow', 'red', 'green', 'blue']) {
-    assert.match(css, new RegExp(`body\\[data-finish="${finish}"\\]`));
-    assert.match(css, new RegExp(`\\.tv-set\\[data-finish="${finish}"\\] \\.control-panel`));
-    assert.match(css, /\.tv-set\[data-finish\] \.deck-module/);
-  }
-  assert.match(html, /CASE FINISH/);
+  assert.match(css, /\.tv-set\[data-finish="wood"\][\s\S]*?--cabinet-tint/);
+  assert.match(css, /\.tv-set\[data-finish="clear"\][\s\S]*?--cabinet-tint/);
+  assert.match(css, /\.tv-set\[data-finish\] \.deck-module/);
+  assert.match(html, /CASE MATERIAL/);
+  assert.match(html, /id="cabinetTint" type="color"/);
 });
 
 test('later redesign-only sections and controls are absent', () => {
@@ -47,6 +48,10 @@ test('later redesign-only sections and controls are absent', () => {
   assert.doesNotMatch(html, /NTSC\s*[·.]\s*60\s*HZ/i);
   assert.match(html, /class="playlist-panel"/);
   assert.match(html, /class="deck-module"/);
+  assert.match(html, /id="status" class="visually-hidden"/);
+  assert.doesNotMatch(html, /<details|class="room-header"|id="libraryButton"/);
+  assert.match(css, /control-panel \{[\s\S]*?overflow:hidden/);
+  assert.match(css, /body\.cursor-idle,body\.cursor-idle \*/);
   assert.match(html, /class="transport under-screen"/);
   assert.match(html, /<input id="seek"/);
   assert.match(html, /aria-label="Fast-forward \/ next tape"><svg/);
@@ -59,13 +64,19 @@ test('later redesign-only sections and controls are absent', () => {
 });
 
 test('playback, captions, saved playlists, and preferences retain the historical interfaces', () => {
-  for (const id of ['video', 'playButton', 'previousButton', 'nextButton', 'seek', 'audioTracks', 'subtitleTracks', 'subtitleButton', 'libraryButton']) {
+  for (const id of ['video', 'playButton', 'previousButton', 'nextButton', 'seek', 'audioTracks', 'subtitleTracks', 'subtitleButton', 'openButton']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(renderer, /saturdayTube\.playlists\.v1/);
   assert.match(renderer, /saturdayTube\.controls\.v1/);
-  assert.match(main, /ipcMain\.handle\('open-videos'/);
+  assert.doesNotMatch(main, /ipcMain\.handle\('open-videos'/);
   assert.match(main, /ipcMain\.handle\('open-library-files'/);
+  assert.match(main, /ipcMain\.handle\('import-library-files'/);
+  assert.match(main, /ipcMain\.handle\('restore-library-folder'/);
+  assert.match(shelfStorage, /COPYFILE_EXCL/);
+  assert.match(renderer, /saturdayTube\.shelf\.root\.v1/);
+  assert.match(preload, /restoreLibraryFolder/);
+  assert.match(preload, /importLibraryFiles/);
   assert.match(main, /ipcMain\.handle\('open-subtitle'/);
   assert.match(main, /ipcMain\.handle\('transcode-media', transcodeMedia\)/);
   assert.match(main, /h264_videotoolbox/);
@@ -90,7 +101,8 @@ test('briefly shows the current video file extension when playback begins', () =
   assert.match(html, /id="fileExtensionBadge"[^>]*hidden/);
   assert.match(renderer, /function showFileExtension\(\)/);
   assert.match(renderer, /extensionBadge\.textContent = match\[1\]\.toUpperCase\(\)/);
-  assert.match(renderer, /setTimeout\(hideFileExtension, 2300\)/);
+  assert.match(renderer, /setTimeout\(hideFileExtension, 2000\)/);
+  assert.match(css, /\.file-extension-badge[^\n]*font:700 10px ui-monospace/);
   assert.match(renderer, /if \(!currentTrackStarted\) \{ showFileExtension\(\); currentTrackStarted = true; \}/);
 });
 
@@ -136,10 +148,11 @@ test('all user-adjustable dials span 0–100 and TV bypasses stay independent', 
     assert.match(tag, /aria-valuemin="0"/);
     assert.match(tag, /aria-valuemax="100"/);
   }
-  for (const id of ['videoBypassToggle', 'audioBypassToggle', 'crtToggle']) assert.match(html, new RegExp(`id="${id}"`));
-  assert.match(renderer, /videoFiltersEnabled = !videoFiltersEnabled/);
+  for (const id of ['pictureBypassToggle', 'audioBypassToggle']) assert.match(html, new RegExp(`id="${id}"`));
+  for (const removed of ['videoBypassToggle', 'crtToggle', 'filterToggle']) assert.doesNotMatch(html, new RegExp(`id="${removed}"`));
+  assert.match(renderer, /pictureFiltersEnabled = !pictureFiltersEnabled/);
   assert.match(renderer, /audioFiltersEnabled = !audioFiltersEnabled/);
-  assert.match(renderer, /tvFiltersEnabled = !tvFiltersEnabled/);
+  assert.match(html, /PICTURE FILTER BYPASS/);
 });
 
 test('LOWSTIM, true grayscale, and rear projection have separate picture paths', () => {
@@ -164,6 +177,10 @@ test('metadata lookup caches results and leaves unmatched titles honest', () => 
   assert.match(renderer, /saturdayTube\.metadata\.v1/);
   assert.match(renderer, /NO MATCH · FILE NAME RETAINED/);
   assert.match(renderer, /FILE NAME RETAINED/);
+  assert.match(main, /image: show\.image\?\.medium/);
+  assert.match(main, /thumbnail\?\.source/);
+  assert.match(main, /api\/rest_v1\/page\/summary/);
+  assert.match(main, /summary\.originalimage\?\.source/);
 });
 
 test('maximum tape faults remain deliberately gentle and Glare has no fixed stripe', () => {

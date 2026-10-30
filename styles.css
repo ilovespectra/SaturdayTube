@@ -218,6 +218,7 @@ button { color: inherit; }
 
 button:hover { filter: brightness(1.08); }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #f1d895; outline-offset: 2px; }
+.visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 
 @media (max-width: 1050px) {
   .television-face { grid-template-columns: minmax(0, 1fr) 225px; gap: 12px; padding: 13px; }
@@ -564,6 +565,174 @@ body[data-finish="clear"] { --case-text:#f0efff; --case-muted:#ded6ff; --case-ac
 .tv-set[data-finish="clear"] .playlist-panel,
 .tv-set[data-finish="clear"] .deck-module { background:linear-gradient(145deg,#e4f7ff36,#716b9a9c); backdrop-filter:blur(1px); }
 .tv-set[data-finish="clear"] .clear-internals img { opacity:1; }
+
+/* Compact, always-visible control bay; only the playlist's own tape list scrolls. */
+.room { max-width:none; padding:0; }
+.tv-set { padding:0; border-width:9px; border-top-width:0; border-radius:0 0 28px 28px; }
+.television-face { gap:clamp(9px,1vw,16px); padding:clamp(8px,1vw,15px); }
+.control-panel {
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-auto-rows:min-content; align-content:start;
+  gap:4px; min-height:0; max-height:none; padding:6px; overflow:hidden; overscroll-behavior:auto; scrollbar-width:none;
+}
+.control-panel::-webkit-scrollbar { display:none; }
+.compact-panel-heading,.primary-dials,.picture-control-group,.audio-control-group,.finish-panel,.signal-settings,.view-section { grid-column:1 / -1; }
+.compact-panel-heading { display:flex; justify-content:space-between; margin:0; padding:0 2px; font-size:6px; line-height:1.2; }
+.primary-dials { grid-template-columns:repeat(3,minmax(0,1fr)); gap:2px; }
+.primary-dials .dial-control { grid-template-columns:1fr; row-gap:2px; }
+.primary-dials .dial-name { grid-column:1; font-size:5px; }
+.primary-dials .dial-output { grid-column:1; font-size:5px; }
+.primary-dials .dial { grid-column:1; width:clamp(34px,4vh,46px); height:clamp(34px,4vh,46px); padding:3px; }
+.primary-dials .dial-rim { padding:2px; }
+.primary-dials .dial-face { inset:3px; }
+.primary-dials .dial-pointer::before { top:3px; height:8px; width:2px; left:calc(50% - 1px); }
+.picture-control-group { min-width:0; padding:4px; border:1px solid var(--case-border,#755032); border-radius:5px; background:linear-gradient(145deg,#ffffff0b,transparent 54%,#0003),var(--case-inset,#24170f); }
+.control-group-heading { display:flex; justify-content:space-between; margin:0 1px 3px; color:var(--case-muted,#d1b58b); font:6px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.1em; }
+.advanced-dials { grid-template-columns:repeat(4,minmax(0,1fr)); gap:3px 1px; padding:0; }
+.advanced-dials .dial-control { grid-template-columns:1fr; row-gap:1px; }
+.advanced-dials .dial-name,.advanced-dials .dial-output { grid-column:1; font-size:5px; letter-spacing:.06em; }
+.advanced-dials .dial { grid-column:1; width:clamp(30px,3.7vh,38px); height:clamp(30px,3.7vh,38px); padding:2px; }
+.advanced-dials .dial-rim { padding:2px; }
+.advanced-dials .dial-face { inset:2px; }
+.advanced-dials .dial-pointer::before { top:2px; height:7px; width:2px; left:calc(50% - 1px); }
+.audio-control-group { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); align-items:center; gap:5px; padding:4px; border:1px solid var(--case-border,#755032); border-radius:5px; background:linear-gradient(145deg,#ffffff0d,transparent 54%,#0003),var(--case-panel,#33271d); }
+.signal-control { min-width:0; gap:3px; margin:0; font-size:5px; }
+.signal-control select { min-width:0; padding:4px 14px 4px 5px; font-size:6px; }
+.audio-effect-controls { display:grid; grid-template-columns:39px minmax(0,1fr); align-items:center; gap:4px; min-width:0; }
+.fx-amount-control { width:39px; margin:0; row-gap:1px; }
+.fx-amount-control .dial { width:34px; height:34px; padding:2px; }
+.fx-amount-control .dial-name,.fx-amount-control .dial-output { font-size:5px; }
+.fx-amount-control .dial-rim { padding:2px; }
+.fx-amount-control .dial-face { inset:2px; }
+.fx-amount-control .dial-pointer::before { top:2px; height:7px; width:2px; left:calc(50% - 1px); }
+.bypass-row { gap:3px; margin:0; padding:4px; font-size:5px; letter-spacing:.05em; }
+.bypass-row .power-switch { width:30px; height:18px; padding:1px; }
+.bypass-row .power-switch i { width:14px; height:14px; }
+.bypass-row .power-switch.on i { transform:translateX(12px); }
+.finish-panel { min-width:0; margin:0; padding:4px; }
+.finish-heading { gap:3px; font-size:6px; letter-spacing:.08em; }
+.finish-heading span:last-child { font-size:5px; }
+.finish-options { gap:3px; margin-top:3px; }
+.finish-options button { min-width:0; min-height:21px; padding:3px 1px; font-size:5px; }
+.finish-tint-control { display:flex; align-items:center; justify-content:space-between; gap:4px; margin-top:3px; color:var(--case-muted,#d1b58b); font:5px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.045em; }
+.finish-tint-control input { width:33px; height:19px; padding:1px; border:1px solid var(--case-border,#755032); border-radius:3px; background:var(--case-inset,#24170f); cursor:pointer; }
+.signal-settings { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+.picture-bypass-row { grid-column:1 / -1; }
+.view-section { min-width:0; }
+.view-label { margin:0 0 3px; font-size:6px; }
+.view-modes { gap:4px; }
+.view-button { min-height:29px; gap:0; padding:2px; }
+.view-button > span { display:none; }
+.view-button small { font-size:5px; }
+.playlist-panel,.deck-module { grid-column:1 / -1; min-width:0; min-height:0; align-self:stretch; margin:0; padding:5px; }
+.playlist-panel { display:flex; flex-direction:column; }
+.playlist-heading { font-size:6px; }
+#playlistCount { font-size:5px; }
+.playlist-tools { grid-template-columns:minmax(0,1fr) 20px 20px; gap:2px; margin-top:3px; }
+.playlist-tools select,.playlist-name { padding:3px 4px; font-size:7px; }
+.playlist-tools select { padding-right:12px; }
+.playlist-tools button { font-size:8px; }
+.playlist-name { margin-top:3px; }
+.playlist-items { flex:0 0 auto; height:clamp(34px,7vh,60px); min-height:30px; max-height:60px; margin:3px 0 1px; }
+.playlist-row { min-height:20px; grid-template-columns:minmax(0,1fr) 18px; }
+.track-entry { gap:3px; padding:2px; }
+.track-title { font-size:6px; }
+.remove-track { width:17px; height:17px; }
+.playlist-hint { margin-top:auto; padding-top:2px; font-size:4px; }
+.deck-module { gap:4px; }
+.deck-module-heading { align-items:flex-start; font-size:5px; letter-spacing:.06em; }
+.deck-module .deck-display { gap:3px; padding:3px; font-size:5px; letter-spacing:.04em; }
+.deck-module .deck-led { width:4px; height:4px; }
+.deck-insert-row { display:block; }
+.deck-insert-row .cassette-port { display:flex; flex-direction:column; align-items:stretch; justify-content:center; gap:7px; width:100%; height:78px; padding:9px; border-width:3px; border-radius:5px; }
+.deck-insert-row .cassette-port::before { inset:4px; border-color:color-mix(in srgb,var(--case-accent,#e6c77c) 55%,#29231e); }
+.vhs-slot-door { position:relative; z-index:1; display:block; width:100%; height:30px; border:1px solid #0a0b0c; border-radius:3px; background:linear-gradient(180deg,#45484a,#17191a 18%,#090a0b 70%,#777773); box-shadow:inset 0 1px #ffffff3d,inset 0 -2px 4px #000,0 1px #d1b88466; }
+.vhs-slot-window { position:absolute; top:10px; left:8%; right:8%; height:8px; border:1px solid #050606; border-radius:4px; background:linear-gradient(90deg,#050606,#4c514d 18%,#101212 48%,#585951 79%,#060707); box-shadow:inset 0 1px #ffffff24; }
+.vhs-slot-lip { position:absolute; left:15%; right:15%; bottom:-3px; height:4px; border:1px solid #1b1c1d; border-radius:2px; background:linear-gradient(#b0a98e,#504c40); }
+.vhs-slot-eject { position:absolute; right:5px; bottom:4px; width:8px; height:5px; border:1px solid #171513; border-radius:2px; background:#aa9b78; box-shadow:0 0 0 1px #000; }
+.slot-caption { position:relative; z-index:1; display:flex; justify-content:space-between; align-items:center; gap:3px; color:var(--case-muted,#d1b58b); font:5px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.04em; }
+.slot-caption b { font-size:5px; }
+.slot-caption small { color:var(--case-text,#f4e8d0); font-size:4px; }
+.deck-options { grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; }
+.deck-module .subtitle-load { grid-column:1 / -1; }
+.deck-module .track-control { grid-template-columns:42px minmax(0,1fr); }
+.deck-module .track-control { grid-template-columns:34px minmax(0,1fr); gap:3px; }
+.deck-module .track-control select { padding:3px 10px 3px 3px; font-size:6px; }
+.deck-module .subtitle-load { grid-column:1; min-height:18px; padding:3px; font-size:5px; }
+.file-extension-badge { padding:4px 6px; border-radius:2px; font:700 10px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.11em; text-shadow:0 0 7px #dcf5b4; }
+body.cursor-idle,body.cursor-idle * { cursor:none !important; }
+.library-cover { display:block; width:min(100%,126px); height:78px; flex:0 0 auto; object-fit:cover; object-position:center 25%; border:1px solid #584830; border-radius:3px; background:#31291e; box-shadow:0 2px 5px #24180f88; }
+.library-cover[hidden] { display:none; }
+.library-tape:has(.library-cover:not([hidden])) .library-cassette { display:none; }
+
+/* Full-spectrum lacquer/wood tint remains independent from the four materials. */
+body[data-finish="wood"] { background:radial-gradient(ellipse at 50% 8%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 26%,#38271b) 0,#241a14 58%,#100d0b 100%); }
+body[data-finish="clear"] { background:radial-gradient(ellipse at 50% 8%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 34%,#37354b) 0,#252433 58%,#111117 100%); }
+.tv-set[data-finish="wood"] {
+  --case-shell:linear-gradient(112deg,color-mix(in srgb,var(--cabinet-tint,#9b6334) 56%,#27180f),color-mix(in srgb,var(--cabinet-tint,#9b6334) 82%,#f1d5a0) 12%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 66%,#21130b) 29%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 90%,#d9b27c) 51%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 63%,#1e120a) 74%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 84%,#ffe6b4) 91%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 49%,#170d08));
+  --case-panel:color-mix(in srgb,var(--cabinet-tint,#9b6334) 45%,#382316);
+  --case-border:color-mix(in srgb,var(--cabinet-tint,#9b6334) 48%,#392415);
+  --case-accent:color-mix(in srgb,var(--cabinet-tint,#9b6334) 34%,#f0d7a3);
+  border-color:color-mix(in srgb,var(--cabinet-tint,#9b6334) 65%,#392315);
+  background-image:linear-gradient(110deg,#fff2,transparent 15%,#0002 38%,transparent 62%,#0002 84%,#fff2),repeating-linear-gradient(88deg,transparent 0 12px,color-mix(in srgb,var(--cabinet-tint,#9b6334) 42%,transparent) 13px,transparent 14px 21px),repeating-linear-gradient(2deg,transparent 0 61px,#fff1 62px,transparent 64px 120px),var(--case-shell);
+  box-shadow:0 18px 38px #090604bb,0 5px 0 color-mix(in srgb,var(--cabinet-tint,#9b6334) 48%,#21140c),inset 0 2px 2px #ffe3ad66,inset 0 -9px 15px #27130788;
+}
+.tv-set[data-finish="wood"] .television-face { background:repeating-linear-gradient(89deg,transparent 0 21px,#ffffff08 22px,transparent 23px 37px),linear-gradient(145deg,color-mix(in srgb,var(--cabinet-tint,#9b6334) 28%,#34251b),color-mix(in srgb,var(--cabinet-tint,#9b6334) 24%,#1d1611)); }
+.tv-set[data-finish="wood"] .control-panel { background-image:linear-gradient(112deg,#ffffff12,transparent 38%,#0004),repeating-linear-gradient(88deg,transparent 0 9px,color-mix(in srgb,var(--cabinet-tint,#9b6334) 26%,transparent) 10px,transparent 11px 17px),var(--case-shell); }
+.tv-set[data-finish="wood"] .finish-panel,.tv-set[data-finish="wood"] .playlist-panel,.tv-set[data-finish="wood"] .deck-module,.tv-set[data-finish="wood"] .audio-control-group { background-color:color-mix(in srgb,var(--cabinet-tint,#9b6334) 37%,#21170f); }
+.tv-set[data-finish="clear"] {
+  --case-border:color-mix(in srgb,var(--cabinet-tint,#9b6334) 46%,#e3f7ff);
+  --case-accent:color-mix(in srgb,var(--cabinet-tint,#9b6334) 52%,#c5f7ff);
+  --case-shell:linear-gradient(112deg,color-mix(in srgb,var(--cabinet-tint,#9b6334) 42%,#f8ffff) 0%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 24%,#f4ffff) 12%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 50%,#d2e5ff) 31%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 32%,#eeeaff) 55%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 50%,#78708c) 76%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 22%,#fff) 93%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 52%,#504766));
+  background-image:linear-gradient(115deg,#ffffff76 0,#ffffff1a 18%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 22%,transparent) 48%,#ffffff26 100%),var(--case-shell);
+}
+.tv-set[data-finish="clear"] .control-panel { border-color:var(--case-border); background-image:linear-gradient(135deg,#ffffff80,#ffffff32 48%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 48%,transparent)); background-color:color-mix(in srgb,var(--cabinet-tint,#9b6334) 31%,#6b6c82); backdrop-filter:blur(2px) saturate(1.2); }
+.tv-set[data-finish="clear"] .television-face { background:linear-gradient(145deg,#ffffff1b,color-mix(in srgb,var(--cabinet-tint,#9b6334) 25%,#29284166)); }
+.tv-set[data-finish="clear"] .finish-panel,.tv-set[data-finish="clear"] .playlist-panel,.tv-set[data-finish="clear"] .deck-module,.tv-set[data-finish="clear"] .audio-control-group { background:linear-gradient(145deg,#ffffff24,color-mix(in srgb,var(--cabinet-tint,#9b6334) 28%,#5b5577b0)); }
+.tv-set[data-finish="clear"] .clear-internals { mix-blend-mode:screen; }
+.tv-set[data-finish="clear"] .screen-bezel { border-color:var(--case-border); }
+.tv-set[data-finish="clear"] .tv-set, .tv-set[data-finish="grey"], .tv-set[data-finish="black"] { --cabinet-tint:transparent; }
+.tv-set[data-finish="grey"],.tv-set[data-finish="black"] { filter:saturate(1); }
+.tv-set .picture-control-group { color:var(--case-text); }
+
+/* Generic age: rubbed corners, fine scratches and worn hardware, not franchise art. */
+.tv-set[data-finish] { border-bottom-color:color-mix(in srgb,var(--case-border,#755032) 65%,#110d0a); }
+.tv-set[data-finish]::before { box-shadow:inset 0 0 0 2px #32190d55,inset 0 0 0 5px #ffffff0a; }
+.television-face { box-shadow:inset 0 2px 11px #090604,inset 0 0 0 1px #80603b55,0 2px 0 #e0b77b30; }
+.screen-bezel { box-shadow:inset 0 0 0 3px #100d0b,inset 0 4px 10px #000d,0 4px 7px #080503, inset 0 0 0 5px #ffffff07; }
+.finish-options button[data-finish="wood"] { background:repeating-linear-gradient(2deg,color-mix(in srgb,var(--cabinet-tint,#9b6334) 76%,#26170f) 0 3px,color-mix(in srgb,var(--cabinet-tint,#9b6334) 72%,#e3bc82) 4px 6px); }
+.finish-options button[data-finish="clear"] { background:linear-gradient(130deg,color-mix(in srgb,var(--cabinet-tint,#9b6334) 42%,#c2f3ef) 0%,#ffffff70 50%,color-mix(in srgb,var(--cabinet-tint,#9b6334) 46%,#f3d4ff) 100%); }
+.finish-options button[data-finish="grey"],.finish-options button[data-finish="black"] { filter:grayscale(1); }
+
+@media (min-width:761px) and (max-height:720px) {
+  .television-face { padding:6px; gap:7px; }
+  .control-panel { gap:3px; padding:4px; }
+  .primary-dials .dial { width:32px; height:32px; }
+  .advanced-dials .dial { width:28px; height:28px; }
+  .playlist-items { height:30px; min-height:30px; max-height:30px; }
+  .deck-insert-row .cassette-port { height:68px; }
+  .deck-insert-row .cassette-port { height:56px; }
+  .deck-module { gap:3px; padding:4px; }
+}
+@media (max-width:760px) {
+  .room { padding:0; }
+  .tv-set { padding:0; border-width:6px; border-top-width:0; border-radius:0 0 18px 18px; }
+  .television-face { grid-template-columns:minmax(0,1fr) 210px; grid-template-rows:minmax(0,1fr); gap:6px; padding:5px; }
+  .control-panel { grid-template-columns:minmax(0,1fr) minmax(0,1fr); overflow:hidden; }
+  .primary-dials .dial { width:32px; height:32px; }
+  .advanced-dials .dial { width:29px; height:29px; }
+  .playlist-items { height:32px; min-height:32px; max-height:32px; }
+  .deck-insert-row .cassette-port { height:70px; }
+}
+@media (max-width:560px) {
+  html { min-width:320px; overflow:auto; }
+  body { overflow:auto; }
+  .room { height:auto; min-height:100dvh; overflow:visible; }
+  .tv-set { flex:0 0 auto; min-height:100dvh; overflow:visible; border-top-width:0; }
+  .television-face { min-height:100dvh; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(160px,1fr) auto; padding:6px; }
+  .picture-cabinet { min-height:220px; }
+  .control-panel { grid-template-columns:minmax(0,1fr) minmax(0,1fr); overflow:visible; }
+  .deck-insert-row .cassette-port { height:78px; }
+}
 
 @media (max-width:760px) {
   .library-toolbar { grid-template-columns:minmax(0,1fr) minmax(0,1fr) 31px; }
