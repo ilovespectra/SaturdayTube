@@ -1,13 +1,18 @@
-const { app, BrowserWindow, dialog, ipcMain, protocol } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, protocol, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { Readable } = require('node:stream');
 const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
-const { copyFileIntoShelf } = require('./shelf-storage.cjs');
+const { copyFileIntoShelf, removeFileFromShelf } = require('./shelf-storage.cjs');
+const { lookupMetadata: lookupMediaMetadata, parseMetadataFilename } = require('./metadata-service.cjs');
+const { readWindowBounds, restoreWindowBounds, writeWindowBounds } = require('./window-state.cjs');
+const { CommercialsService } = require('./commercials-service.cjs');
+const { scanChannelFolder, createBroadcastSchedule, reconcileChannelPlayback, selectDirectChannelCommercialSources, insideRoot, VIDEO_EXTENSIONS, isMovieOnlyChannel, isMovieExtraPath, isChannelFolder, discoverAdjacent666Channel, resolveChannelCommercialsRoot } = require('./channels-service.cjs');
 
-app.setName(process.env.SATURDAY_TUBE_QA === '1' ? 'Saturday Tube QA' : app.isPackaged ? 'Saturday Tube Candidate' : 'Saturday Tube Dev');
+app.setName(process.env.SATURDAY_TUBE_QA === '1' ? 'Saturday Tube QA' : app.isPackaged ? app.getName() : 'Saturday Tube Dev');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 let launchLogPath;
 function logLaunch(event, detail = '') {
@@ -55,10 +60,36 @@ protocol.registerSchemesAsPrivileged([{
   scheme: 'saturday',
   privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
 }]);
+ipcMain.handle('toggle-window-fullscreen', event => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window || window.isDestroyed()) return false;
+  window.setFullScreen(!window.isFullScreen());
+  return !window.isFullScreen();
+});
+ipcMain.handle('get-window-fullscreen', event => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  return Boolean(window && !window.isDestroyed() && window.isFullScreen());
+});
 
 const mediaFiles = new Map();
+const commercialMediaFiles = new Map();
+let commercialService = null;
+let staticInputMedia = null;
 const subtitleFiles = new Map();
 const libraryRoots = new Map();
+const channelRoots = new Map();
+const channelDurationCache = new Map();
+const MAX_CHANNEL_DURATION_CACHE_ENTRIES = 8000;
+function rememberChannelDuration(filePath, entry) {
+  channelDurationCache.delete(filePath);
+  channelDurationCache.set(filePath, entry);
+  while (channelDurationCache.size > MAX_CHANNEL_DURATION_CACHE_ENTRIES) {
+    channelDurationCache.delete(channelDurationCache.keys().next().value);
+  }
+}
+let channelDurationCacheLoadPromise = null;
+let channelDurationCacheLoaded = false;
+const channelCommercialImportJobs = new Map();
 const mimeByExt = {
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.3gp': 'video/3gpp', '.3g2': 'video/3gpp2',
   '.webm': 'video/webm', '.ogv': 'video/ogg', '.ogg': 'video/ogg', '.mkv': 'video/x-matroska',
@@ -69,6 +100,9 @@ const mimeByExt = {
 };
 const transcodeJobs = new Map();
 const MAX_TRANSCODE_CACHE_BYTES = 3 * 1024 ** 3;
+const COMMERCIAL_SOURCE_ROOT = '/Volumes/BIGGERDRIVE/WATCH/Commercials';
+const MOVIE_TRAILERS_ROOT = '/Volumes/BIGGERDRIVE/WATCH/MoviePreviews';
+let movieTrailerCache = null;
 
 function srtToVtt(text) {
   let body = text.replace(/^\uFEFF/, '').replace(/\r/g, '');
@@ -119,11 +153,33 @@ function serveAppAsset(url) {
   const appAssets = {
     'index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
     'renderer.js': { file: 'renderer.js', type: 'text/javascript; charset=utf-8' },
+    'commercial-mode.js': { file: 'commercial-mode.js', type: 'text/javascript; charset=utf-8' },
+    'movie-preroll.js': { file: 'movie-preroll.cjs', type: 'text/javascript; charset=utf-8' },
     'styles.css': { file: 'styles.css', type: 'text/css; charset=utf-8' },
+    'commercials.css': { file: 'commercials.css', type: 'text/css; charset=utf-8' },
     'assets/materials/loewe-back.jpg': { file: 'assets/materials/loewe-back.jpg', type: 'image/jpeg' },
     'assets/materials/clear-gameboy.jpg': { file: 'assets/materials/clear-gameboy.jpg', type: 'image/jpeg' },
     'assets/materials/philips-chassis.jpg': { file: 'assets/materials/philips-chassis.jpg', type: 'image/jpeg' },
-    'assets/materials/chassis-simulation.svg': { file: 'assets/materials/chassis-simulation.svg', type: 'image/svg+xml' }
+    'assets/materials/chassis-simulation.svg': { file: 'assets/materials/chassis-simulation.svg', type: 'image/svg+xml' },
+    'assets/static/analog-tv-static-loop.mp4': { file: 'assets/static/analog-tv-static-loop.mp4', type: 'video/mp4' },
+    'assets/static/tv-static-4k-60fps.mp4': { file: 'assets/static/tv-static-4k-60fps.mp4', type: 'video/mp4' },
+    'assets/audio/quick/button-click.wav': { file: 'assets/audio/quick/button-click.wav', type: 'audio/wav' },
+    'assets/audio/quick/clicking.wav': { file: 'assets/audio/quick/clicking.wav', type: 'audio/wav' },
+    'assets/audio/quick/crt-poweroff.wav': { file: 'assets/audio/quick/crt-poweroff.wav', type: 'audio/wav' },
+    'assets/audio/quick/crt-poweronanddegause.wav': { file: 'assets/audio/quick/crt-poweronanddegause.wav', type: 'audio/wav' },
+    'assets/audio/quick/startup-chiptune.wav': { file: 'assets/audio/quick/startup-chiptune.wav', type: 'audio/wav' },
+    'assets/audio/quick/vhs-eject.wav': { file: 'assets/audio/quick/vhs-eject.wav', type: 'audio/wav' },
+    'assets/audio/quick/vhs-insert.wav': { file: 'assets/audio/quick/vhs-insert.wav', type: 'audio/wav' },
+    'assets/audio/button-click.mp3': { file: 'assets/audio/button-click.mp3', type: 'audio/mpeg' },
+    'assets/audio/clicking.mp3': { file: 'assets/audio/clicking.mp3', type: 'audio/mpeg' },
+    'assets/audio/crt-cutoff.mp3': { file: 'assets/audio/crt-cutoff.mp3', type: 'audio/mpeg' },
+    'assets/audio/crt-hum-loop.wav': { file: 'assets/audio/crt-hum-loop.wav', type: 'audio/wav' },
+    'assets/audio/crt-poweroff.mp3': { file: 'assets/audio/crt-poweroff.mp3', type: 'audio/mpeg' },
+    'assets/audio/crt-poweronanddegause.mp3': { file: 'assets/audio/crt-poweronanddegause.mp3', type: 'audio/mpeg' },
+    'assets/audio/startup-chiptune.mp3': { file: 'assets/audio/startup-chiptune.mp3', type: 'audio/mpeg' },
+    'assets/audio/static.mp3': { file: 'assets/audio/static.mp3', type: 'audio/mpeg' },
+    'assets/audio/vhs-eject.mp3': { file: 'assets/audio/vhs-eject.mp3', type: 'audio/mpeg' },
+    'assets/audio/vhs-insert.mp3': { file: 'assets/audio/vhs-insert.mp3', type: 'audio/mpeg' }
   };
   const asset = appAssets[name];
   if (!asset) return new Response('Not found', { status: 404 });
@@ -138,22 +194,24 @@ function registerMediaFile(filePath) {
   return { id, url: `saturday://app/media/${id}`, title: path.basename(filePath), path: filePath };
 }
 
-function metadataSearchTerms(filename) {
-  const basename = path.basename(String(filename || '')).replace(/\.[^.]+$/, '');
-  const year = (basename.match(/\b(?:19|20)\d{2}\b/) || [])[0] || '';
-  const query = basename
-    .replace(/\[[^\]]*\]|\([^)]*\)/g, ' ')
-    .replace(/[._]+/g, ' ')
-    .replace(/\b(?:S\d{1,2}E\d{1,2}|\d{1,2}x\d{2})\b/ig, ' ')
-    .replace(/\b(?:2160p|1440p|1080p|720p|480p|4k|8k|uhd|hdr|web[- ]?dl|web[- ]?rip|bluray|blu[- ]?ray|brrip|hdtv|dvdrip|x26[45]|h26[45]|hevc|av1|aac|dts|proper|repack|extended|remastered|multi|dubbed|subbed)\b.*$/i, ' ')
-    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return { query, year };
-}
-
-function stripMarkup(text) {
-  return String(text || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+async function getMovieTrailers() {
+  if (movieTrailerCache) return movieTrailerCache;
+  const root = await fs.promises.realpath(MOVIE_TRAILERS_ROOT);
+  if (!(await fs.promises.stat(root)).isDirectory()) throw new Error('Movie trailer folder is unavailable.');
+  const found = [];
+  const visit = async directory => {
+    for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
+      const candidate = path.join(directory, entry.name);
+      if (entry.isDirectory() && !entry.name.startsWith('.')) await visit(candidate);
+      else if (entry.isFile() && VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+        const real = await fs.promises.realpath(candidate).catch(() => null);
+        if (real && insideRoot(root, real)) found.push(registerMediaFile(real));
+      }
+    }
+  };
+  await visit(root);
+  movieTrailerCache = found;
+  return found;
 }
 
 async function fetchMetadataJson(url) {
@@ -168,63 +226,8 @@ async function fetchMetadataJson(url) {
   }
 }
 
-async function lookupMetadata(_event, filename) {
-  const { query, year } = metadataSearchTerms(filename);
-  if (query.length < 2 || query.length > 100) return null;
-  try {
-    const shows = await fetchMetadataJson(`https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`);
-    const match = Array.isArray(shows) && shows.find(result => {
-      const premiered = result?.show?.premiered?.slice(0, 4);
-      return result?.show?.name && Number(result.score) >= 0.45 && (!year || !premiered || Math.abs(Number(year) - Number(premiered)) <= 2);
-    });
-    if (match) {
-      const show = match.show;
-      return {
-        title: show.name,
-        year: show.premiered?.slice(0, 4) || '',
-        kind: show.type || 'TV',
-        detail: stripMarkup(show.summary).slice(0, 260),
-        image: show.image?.medium || show.image?.original || '',
-        url: show.url || '',
-        source: 'TVmaze'
-      };
-    }
-  } catch (error) {
-    console.warn('TV metadata lookup was unavailable', error?.message || error);
-  }
-  try {
-    const search = await fetchMetadataJson(`https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(`${query} ${year}`.trim())}&limit=5`);
-    const pages = Array.isArray(search?.pages) ? search.pages : [];
-    const normalized = query.toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    const page = pages.find(item => {
-      const title = String(item.title || '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-      const searchable = [item.title, item.description, item.excerpt].join(' ').toLocaleLowerCase();
-      const yearMatches = !year || new RegExp(`\\b${year}\\b`).test(searchable);
-      return (title === normalized || title.includes(normalized)) && yearMatches;
-    });
-    if (!page) return null;
-    let image = page.thumbnail?.source || page.thumbnail?.url || '';
-    if (!image && page.key) {
-      try {
-        const summary = await fetchMetadataJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(page.key)}`);
-        image = summary.thumbnail?.source || summary.originalimage?.source || '';
-      } catch (error) {
-        console.warn('Wikipedia cover lookup was unavailable', error?.message || error);
-      }
-    }
-    return {
-      title: page.title || query,
-      year: year || ((String(page.description || '').match(/\b(?:19|20)\d{2}\b/) || [])[0] || ''),
-      kind: 'Reference',
-      detail: stripMarkup(page.description || page.excerpt).slice(0, 260),
-      image,
-      url: `https://en.wikipedia.org/wiki/${encodeURIComponent(String(page.key || page.title).replace(/ /g, '_'))}`,
-      source: 'Wikipedia'
-    };
-  } catch (error) {
-    console.warn('Reference metadata lookup was unavailable', error?.message || error);
-    return null;
-  }
+async function lookupMetadata(_event, request) {
+  return lookupMediaMetadata(request, fetchMetadataJson);
 }
 
 function insideLibraryRoot(root, candidate) {
@@ -232,10 +235,54 @@ function insideLibraryRoot(root, candidate) {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+async function getManagedTapeShelf(event) {
+  const userDataPath = app.getPath('userData');
+  await fs.promises.mkdir(userDataPath, { recursive: true });
+  const userData = await fs.promises.realpath(userDataPath);
+  const requestedRoot = path.join(userData, 'Managed Tapes');
+  await fs.promises.mkdir(requestedRoot, { recursive: true });
+  const root = await fs.promises.realpath(requestedRoot);
+  const stat = await fs.promises.stat(root);
+  if (root === userData || !insideLibraryRoot(userData, root) || !stat.isDirectory()) {
+    throw new Error('Saturday Tube local tape storage must stay inside this Mac’s app data folder.');
+  }
+  return root;
+}
+
+async function ensureLocalTape(event, filePath) {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Choose an available local tape file.');
+  const source = await fs.promises.realpath(filePath);
+  const sourceStat = await fs.promises.stat(source);
+  if (!sourceStat.isFile()) throw new Error('The selected tape is not a file.');
+  if (!Object.hasOwn(mimeByExt, path.extname(source).toLowerCase())) {
+    const unsupported = new Error('Unsupported video file type.');
+    unsupported.code = 'UNSUPPORTED_FILE';
+    throw unsupported;
+  }
+  const managedRoot = await getManagedTapeShelf(event);
+  const stored = await copyFileIntoShelf(source, managedRoot, {
+    onProgress: ({ copiedBytes, totalBytes }) => sendLibraryImportProgress(event, {
+      phase: 'local-copy-progress', name: path.basename(source), copiedBytes, totalBytes
+    })
+  });
+  return {
+    ...registerMediaFile(stored.path),
+    managedLocalCopy: true,
+    sourcePath: stored.copied ? source : null,
+    managedRoot,
+    copied: stored.copied
+  };
+}
+
+async function ejectManagedTape(event, filePath) {
+  const managedRoot = await getManagedTapeShelf(event);
+  return removeFileFromShelf(filePath, managedRoot);
+}
+
 async function chooseLibraryFolder(event) {
   const result = await dialog.showOpenDialog({
-    title: 'Choose where Saturday Tube should keep imported tapes',
-    buttonLabel: 'Use this shelf folder',
+    title: 'Choose a folder to browse for original tapes',
+    buttonLabel: 'Browse this folder',
     properties: ['openDirectory', 'createDirectory']
   });
   if (result.canceled || !result.filePaths[0]) return null;
@@ -244,6 +291,311 @@ async function chooseLibraryFolder(event) {
   if (!stat.isDirectory()) throw new Error('Choose a folder for your local tape shelf.');
   libraryRoots.set(event.sender.id, root);
   return root;
+}
+
+function rememberChannelRoot(senderId, root) {
+  const roots = channelRoots.get(senderId) || new Set();
+  roots.add(root);
+  channelRoots.set(senderId, roots);
+}
+
+async function restoreChannelDurationCache() {
+  if (channelDurationCacheLoaded) return;
+  if (!channelDurationCacheLoadPromise) {
+    channelDurationCacheLoadPromise = (async () => {
+      const cachePath = path.join(app.getPath('userData'), 'channel-duration-cache.json');
+      try {
+        const saved = JSON.parse(await fs.promises.readFile(cachePath, 'utf8'));
+        for (const [filePath, entry] of Object.entries(saved || {})) {
+          if (typeof filePath === 'string' && path.isAbsolute(filePath) && Number(entry?.size) >= 0
+            && Number.isFinite(Number(entry?.modified)) && Number.isFinite(Number(entry?.duration)) && Number(entry.duration) > 0) {
+            rememberChannelDuration(filePath, { size: Number(entry.size), modified: Number(entry.modified), duration: Number(entry.duration) });
+          }
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') console.warn('TV channel duration cache could not be restored', error?.message || error);
+      }
+    })().finally(() => {
+      channelDurationCacheLoaded = true;
+      channelDurationCacheLoadPromise = null;
+    });
+  }
+  await channelDurationCacheLoadPromise;
+}
+
+async function persistChannelDurationCache() {
+  const cachePath = path.join(app.getPath('userData'), 'channel-duration-cache.json');
+  const entries = [...channelDurationCache.entries()].slice(-MAX_CHANNEL_DURATION_CACHE_ENTRIES);
+  const temporary = `${cachePath}.${process.pid}.${randomUUID()}.partial`;
+  try {
+    await fs.promises.writeFile(temporary, `${JSON.stringify(Object.fromEntries(entries))}\n`, { mode: 0o600 });
+    await fs.promises.rename(temporary, cachePath);
+  } catch (error) {
+    await fs.promises.unlink(temporary).catch(() => {});
+    console.warn('TV channel duration cache could not be saved', error?.message || error);
+  }
+}
+
+async function getReadyChannelCommercials(originalAds) {
+  const [library, sources] = await Promise.all([
+    commercialService.listLibrary(),
+    commercialService.listChannelSources()
+  ]);
+  const sourcesByPath = new Map(sources.map(source => [path.resolve(source.originalPath), source]));
+  const clipsBySource = new Map();
+  for (const clip of library.clips || []) {
+    const clips = clipsBySource.get(clip.sourceId) || [];
+    clips.push(clip);
+    clipsBySource.set(clip.sourceId, clips);
+  }
+  const channelAds = [];
+  const readySourcePaths = new Set();
+  const matchedSources = new Set();
+  let reviewCount = 0;
+  for (const item of originalAds) {
+    const source = sourcesByPath.get(path.resolve(item.path));
+    if (!source) continue;
+    matchedSources.add(source.id);
+    const readyCountBefore = channelAds.length;
+    for (const clip of clipsBySource.get(source.id) || []) {
+      if (!clip.enabled || !clip.reviewed || clip.needsReview) {
+        if (clip.needsReview && !clip.reviewed) reviewCount += 1;
+        continue;
+      }
+      try {
+        const filePath = await commercialService.clipPath(clip.id);
+        const media = registerMediaFile(filePath);
+        const sourceName = path.basename(item.path, path.extname(item.path));
+        channelAds.push({
+          ...media,
+          path: filePath,
+          title: `${sourceName} · ${clip.title}`,
+          durationSeconds: Number(clip.durationSeconds),
+          channelClipId: clip.id,
+          sourceId: source.id
+        });
+      } catch { /* A missing or incomplete generated clip is not scheduled. */ }
+    }
+    if (channelAds.length > readyCountBefore) readySourcePaths.add(path.resolve(item.path));
+  }
+  return { channelAds, readySourcePaths, reviewCount, sourceCount: matchedSources.size };
+}
+
+async function importChannelCommercialSources(commercialsRoot, originalAds) {
+  if (!commercialsRoot || !originalAds.length) return;
+  const sources = await commercialService.listChannelSources();
+  const existingByPath = new Map(sources.map(source => [path.resolve(source.originalPath), source]));
+  for (const item of originalAds) {
+    try {
+      const sourcePath = await fs.promises.realpath(item.path);
+      if (!insideRoot(commercialsRoot, sourcePath)) continue;
+      const stat = await fs.promises.stat(sourcePath);
+      const existing = existingByPath.get(path.resolve(sourcePath));
+      if (existing && Number(existing.sizeBytes) === stat.size && Math.abs(Number(existing.mtimeMs) - stat.mtimeMs) < 1) continue;
+      if (Date.now() - stat.mtimeMs < Number(commercialService.stabilityMs || 90_000)) continue;
+      const durationSeconds = Number(item.durationSeconds) > 0
+        ? Number(item.durationSeconds)
+        : await commercialService.probeDuration(sourcePath);
+      if (!(Number(durationSeconds) > 0)) continue;
+      if (Number(durationSeconds) > 180) await commercialService.importCompilation(sourcePath);
+      else await commercialService.importWatchedFile(commercialsRoot, sourcePath, stat);
+    } catch (error) {
+      console.warn('A channel commercial source was skipped until complete and reviewable', path.basename(item.path), error?.message || error);
+    }
+  }
+}
+
+function scheduleChannelCommercialImports(commercialsRoot, originalAds) {
+  if (!commercialsRoot || !originalAds.length) return;
+  const key = path.resolve(commercialsRoot);
+  if (channelCommercialImportJobs.has(key)) return;
+  const job = new Promise(resolve => {
+    const timer = setTimeout(resolve, 2500);
+    timer.unref?.();
+  }).then(() => importChannelCommercialSources(commercialsRoot, originalAds))
+    .catch(error => console.warn('TV channel commercials could not be prepared in the background', error?.message || error))
+    .finally(() => channelCommercialImportJobs.delete(key));
+  channelCommercialImportJobs.set(key, job);
+}
+
+async function scanChannelRoot(root, event) {
+  await restoreChannelDurationCache();
+  const scanned = await scanChannelFolder(root, {
+    registerMedia: registerMediaFile,
+    probeCommercials: true,
+    probeDuration: async filePath => {
+      const stat = await fs.promises.stat(filePath);
+      const cached = channelDurationCache.get(filePath);
+      if (cached && cached.size === stat.size && cached.modified === stat.mtimeMs) {
+        rememberChannelDuration(filePath, cached);
+        return cached.duration;
+      }
+      if (cached) channelDurationCache.delete(filePath);
+      const duration = await commercialService.probeDuration(filePath);
+      rememberChannelDuration(filePath, { size: stat.size, modified: stat.mtimeMs, duration });
+      return duration;
+    }
+  });
+  await persistChannelDurationCache();
+  const originalAds = scanned.movieOnly ? [] : (scanned.commercials || []);
+  const ready = await getReadyChannelCommercials(originalAds);
+  const directAds = selectDirectChannelCommercialSources(originalAds, ready.readySourcePaths);
+  scanned.commercials = [...ready.channelAds, ...directAds];
+  scanned.commercialCount = scanned.commercials.length;
+  scanned.commercialReviewCount = ready.reviewCount;
+  scanned.commercialCompilationCount = ready.sourceCount;
+  if (!scanned.movieOnly) scheduleChannelCommercialImports(scanned.commercialsRoot, originalAds);
+  return scanned;
+}
+
+async function chooseChannelFolder(event) {
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const result = await dialog.showOpenDialog(owner, {
+    title: 'Choose a TV channel folder with show subfolders',
+    buttonLabel: 'Use as TV channel',
+    properties: ['openDirectory']
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+  const root = await fs.promises.realpath(result.filePaths[0]);
+  if (!(await fs.promises.stat(root)).isDirectory()) throw new Error('Choose a folder for this TV channel.');
+  rememberChannelRoot(event.sender.id, root);
+  try {
+    return await scanChannelRoot(root, event);
+  } catch (error) {
+    console.warn('A selected TV channel folder could not be scanned yet', path.basename(root), error?.message || error);
+    const commercialsRoot = await resolveChannelCommercialsRoot(root).catch(() => null);
+    return {
+      root,
+      name: path.basename(root),
+      movieOnly: isMovieOnlyChannel(root),
+      commercialsRoot,
+      shows: [],
+      commercials: [],
+      showCount: 0,
+      episodeCount: 0,
+      commercialCount: 0,
+      scanError: true
+    };
+  }
+}
+
+async function discoverSiblingChannels(_event, savedRoots) {
+  if (!Array.isArray(savedRoots)) return [];
+  const knownRoots = new Set();
+  const parentFolders = new Set();
+  for (const savedRoot of savedRoots) {
+    if (typeof savedRoot !== 'string' || !path.isAbsolute(savedRoot)) continue;
+    const root = await fs.promises.realpath(savedRoot).catch(() => null);
+    if (!root || !(await fs.promises.stat(root).catch(() => null))?.isDirectory()) continue;
+    knownRoots.add(root);
+    parentFolders.add(path.dirname(root));
+  }
+  const discovered = [];
+  for (const parent of parentFolders) {
+    const entries = await fs.promises.readdir(parent, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name || entry.name.startsWith('.')) continue;
+      const candidate = await fs.promises.realpath(path.join(parent, entry.name)).catch(() => null);
+      if (!candidate || path.dirname(candidate) !== parent || knownRoots.has(candidate)) continue;
+      if (!(await isChannelFolder(candidate))) continue;
+      knownRoots.add(candidate);
+      discovered.push({ root: candidate, name: path.basename(candidate) });
+    }
+    const adjacent666 = await discoverAdjacent666Channel(parent);
+    if (adjacent666 && !knownRoots.has(adjacent666.root)) {
+      knownRoots.add(adjacent666.root);
+      discovered.push(adjacent666);
+    }
+  }
+  return discovered.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+}
+
+async function restoreChannelFolder(event, requestedRoot) {
+  if (typeof requestedRoot !== 'string' || !path.isAbsolute(requestedRoot)) throw new Error('Choose or restore this TV channel folder before scanning it.');
+  const root = await fs.promises.realpath(requestedRoot).catch(() => null);
+  if (!root) throw new Error('This TV channel folder is unavailable. Reconnect its drive or choose the folder again.');
+  const stat = await fs.promises.stat(root).catch(() => null);
+  if (!stat?.isDirectory()) throw new Error('This TV channel path is no longer a folder. Choose the folder again.');
+  rememberChannelRoot(event.sender.id, root);
+  return root;
+}
+
+async function rescanChannelFolder(event, requestedRoot) {
+  const trustedRoots = channelRoots.get(event.sender.id);
+  if (!trustedRoots || typeof requestedRoot !== 'string' || !trustedRoots.has(path.resolve(requestedRoot))) {
+    throw new Error('Choose or restore this TV channel folder before scanning it.');
+  }
+  const root = await fs.promises.realpath(requestedRoot).catch(() => null);
+  if (!root || !trustedRoots.has(root) || !(await fs.promises.stat(root)).isDirectory()) throw new Error('The TV channel folder is unavailable. Reconnect its drive and scan again.');
+  return scanChannelRoot(root, event);
+}
+
+async function buildChannelRound(event, requestedRoot, requestedShows, requestedCommercials, previousState, minimumDurationSeconds = 0) {
+  const trustedRoots = channelRoots.get(event.sender.id);
+  if (!trustedRoots || typeof requestedRoot !== 'string' || !trustedRoots.has(path.resolve(requestedRoot))) throw new Error('Choose or restore this TV channel folder before playback.');
+  const root = await fs.promises.realpath(requestedRoot).catch(() => null);
+  if (!root || !trustedRoots.has(root)) throw new Error('The TV channel folder is unavailable. Reconnect the drive and scan again.');
+  const movieOnly = isMovieOnlyChannel(root);
+  const shows = [];
+  for (const candidate of Array.isArray(requestedShows) ? requestedShows : []) {
+    if (typeof candidate?.path !== 'string' || !Array.isArray(candidate.episodes)) continue;
+    const showPath = await fs.promises.realpath(candidate.path).catch(() => null);
+    if (!showPath) continue;
+    const showStat = await fs.promises.stat(showPath).catch(() => null);
+    const rootLevelMovie = movieOnly && showPath !== root && path.dirname(showPath) === root && showStat?.isFile()
+      && VIDEO_EXTENSIONS.has(path.extname(showPath).toLowerCase()) && !isMovieExtraPath(root, showPath);
+    const movieFolder = movieOnly && path.dirname(showPath) === root && showStat?.isDirectory()
+      && path.basename(showPath).toLocaleLowerCase('en-US') !== 'commercials' && !isMovieExtraPath(root, showPath);
+    const normalShowFolder = !movieOnly && path.dirname(showPath) === root && showStat?.isDirectory()
+      && path.basename(showPath).toLocaleLowerCase('en-US') !== 'commercials';
+    if (movieOnly ? (!rootLevelMovie && !movieFolder) || candidate.episodes.length !== 1 : !normalShowFolder) continue;
+    const episodes = [];
+    for (const item of candidate.episodes) {
+      if (typeof item?.path !== 'string' || !path.isAbsolute(item.path) || !VIDEO_EXTENSIONS.has(path.extname(item.path).toLowerCase())) continue;
+      const filePath = await fs.promises.realpath(item.path).catch(() => null);
+      const durationSeconds = Number(item.durationSeconds);
+      const insideShow = rootLevelMovie ? filePath === showPath : filePath && insideRoot(showPath, filePath);
+      if (!filePath || !insideShow || (movieOnly && isMovieExtraPath(root, filePath))
+        || !(await fs.promises.stat(filePath).catch(() => null))?.isFile()
+        || !Number.isFinite(durationSeconds) || durationSeconds <= 0) continue;
+      episodes.push({ path: filePath, title: path.basename(filePath), durationSeconds });
+    }
+    if (episodes.length && (!movieOnly || episodes.length === 1)) {
+      const name = typeof candidate.name === 'string' && candidate.name ? candidate.name
+        : rootLevelMovie ? path.basename(showPath, path.extname(showPath)) : path.basename(showPath);
+      shows.push({ path: showPath, name, episodes });
+    }
+  }
+  const commercialsRoot = movieOnly ? null : await resolveChannelCommercialsRoot(root);
+  const commercials = [];
+  if (commercialsRoot) {
+    for (const item of Array.isArray(requestedCommercials) ? requestedCommercials : []) {
+      if (typeof item?.channelClipId === 'string') {
+        const record = await commercialService.getClipSource(item.channelClipId).catch(() => null);
+        const clip = record?.clip;
+        const sourcePath = typeof record?.source?.originalPath === 'string' ? await fs.promises.realpath(record.source.originalPath).catch(() => null) : null;
+        const filePath = await commercialService.clipPath(item.channelClipId).catch(() => null);
+        const actualPath = filePath ? await fs.promises.realpath(filePath).catch(() => null) : null;
+        const stat = actualPath ? await fs.promises.stat(actualPath).catch(() => null) : null;
+        const durationSeconds = Number(clip?.durationSeconds);
+        if (!clip || !clip.enabled || !clip.reviewed || clip.needsReview || record?.source?.status !== 'complete'
+          || !sourcePath || !insideRoot(commercialsRoot, sourcePath) || !actualPath || actualPath !== filePath || !stat?.isFile()
+          || (item.sourceId && item.sourceId !== clip.sourceId) || !Number.isFinite(durationSeconds) || durationSeconds < 2.5) continue;
+        commercials.push({ path: actualPath, title: clip.title, durationSeconds });
+        continue;
+      }
+      const requestedPath = typeof item?.path === 'string' && path.isAbsolute(item.path) ? item.path : '';
+      const actualPath = requestedPath ? await fs.promises.realpath(requestedPath).catch(() => null) : null;
+      const stat = actualPath ? await fs.promises.stat(actualPath).catch(() => null) : null;
+      const durationSeconds = Number(item?.durationSeconds);
+      if (!actualPath || !insideRoot(commercialsRoot, actualPath) || !stat?.isFile()
+        || !VIDEO_EXTENSIONS.has(path.extname(actualPath).toLowerCase())
+        || !Number.isFinite(durationSeconds) || durationSeconds < 2.5 || durationSeconds > 180) continue;
+      const media = registerMediaFile(actualPath);
+      commercials.push({ ...media, path: actualPath, title: item.title || path.basename(actualPath), durationSeconds });
+    }
+  }
+  return createBroadcastSchedule(shows, commercials, previousState, minimumDurationSeconds);
 }
 
 async function restoreLibraryFolder(event, requestedRoot) {
@@ -290,47 +642,138 @@ async function openLibraryFiles(event, paths) {
       const actualPath = await fs.promises.realpath(filePath);
       const stat = await fs.promises.stat(actualPath);
       if (!insideLibraryRoot(root, actualPath) || !stat.isFile() || !Object.hasOwn(mimeByExt, path.extname(actualPath).toLowerCase())) continue;
-      found.push(registerMediaFile(actualPath));
-    } catch { /* A removable drive or file may have disappeared while the shelf was open. */ }
+      found.push(await ensureLocalTape(event, actualPath));
+    } catch (error) {
+      console.warn('A selected tape could not be copied into local storage', error?.message || error);
+    }
   }
   return found;
 }
 
-async function importLibraryFiles(event) {
-  const root = libraryRoots.get(event.sender.id);
-  if (!root) throw new Error('Set a local shelf destination before importing tapes.');
+function sendLibraryImportProgress(event, progress) {
+  try {
+    if (event?.sender && !event.sender.isDestroyed()) event.sender.send('library-import-progress', progress);
+  } catch { /* A closed window does not cancel or damage an already-running copy. */ }
+}
+
+function sendCommercialProgress(event, progress) {
+  try {
+    if (event?.sender && !event.sender.isDestroyed()) {
+      event.sender.send('commercials-progress', progress);
+      return;
+    }
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send('commercials-progress', progress);
+    }
+  } catch { /* A closed window does not cancel a safe library import. */ }
+}
+
+async function getCommercialLibrary() {
+  if (!commercialService) throw new Error('Commercial library is not ready yet.');
+  const library = await commercialService.listLibrary();
+  const clips = await Promise.all(library.clips.map(async clip => {
+    const filePath = await commercialService.clipPath(clip.id);
+    const stat = await fs.promises.stat(filePath);
+    const cached = commercialMediaFiles.get(clip.id);
+    let id = cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs ? cached.id : null;
+    if (!id) {
+      id = registerMediaFile(filePath).id;
+      commercialMediaFiles.set(clip.id, { id, size: stat.size, mtimeMs: stat.mtimeMs });
+    }
+    return { ...clip, url: `saturday://app/media/${id}` };
+  }));
+  return { ...library, clips };
+}
+
+async function importCommercialCompilation(event) {
   const result = await dialog.showOpenDialog({
-    title: 'Choose videos to copy onto your Saturday Tube shelf',
-    buttonLabel: 'Copy to shelf',
+    title: 'Add a commercial compilation to Saturday Tube',
+    buttonLabel: 'Split into commercials',
+    properties: ['openFile'],
+    filters: [{ name: 'Video compilations', extensions: ['mp4', 'mov', 'm4v', 'mkv', 'avi', 'webm'] }, { name: 'All files', extensions: ['*'] }]
+  });
+  if (result.canceled || !result.filePaths[0]) return { cancelled: true };
+  const outcome = await commercialService.importCompilation(result.filePaths[0], progress => sendCommercialProgress(event, progress));
+  sendCommercialProgress(event, { phase: 'complete', ...outcome });
+  return outcome;
+}
+
+async function analyzeCommercialBreaks(event, filePath, durationSeconds) {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Choose an available local tape.');
+  const managedRoot = await getManagedTapeShelf(event);
+  const realPath = await fs.promises.realpath(filePath);
+  if (!insideLibraryRoot(managedRoot, realPath)) throw new Error('Fade analysis is limited to tapes on this Mac’s Saturday Tube shelf.');
+  return commercialService.analyzeProgram(realPath, durationSeconds, progress => sendCommercialProgress(event, progress));
+}
+
+function importFailureReason(error) {
+  if (error?.code === 'UNSUPPORTED_FILE') return 'Unsupported video file type.';
+  if (error?.code === 'ENOSPC') return 'This Mac is low on storage. Free space and retry.';
+  if (error?.code === 'EACCES' || error?.code === 'EPERM') return 'Saturday Tube local storage is not writable.';
+  if (['ENOENT', 'ENOTDIR', 'ENODEV'].includes(error?.code)) return 'Source file or local storage is unavailable.';
+  if (error?.code === 'EIO') return 'Drive read/write failed. Check the source drive.';
+  return 'Copy failed. Check the source and local storage, then retry.';
+}
+
+async function importLibraryFiles(event) {
+  const root = await getManagedTapeShelf(event);
+  sendLibraryImportProgress(event, { phase: 'choosing' });
+  const result = await dialog.showOpenDialog({
+    title: 'Choose videos to copy into Saturday Tube on this Mac',
+    buttonLabel: 'Copy to this Mac',
     properties: ['openFile', 'multiSelections'],
     filters: [
       { name: 'Video and audio', extensions: Object.keys(mimeByExt).map(ext => ext.slice(1)) },
       { name: 'All files', extensions: ['*'] }
     ]
   });
-  if (result.canceled || !result.filePaths.length) return { files: [], copied: 0, alreadyOnShelf: 0, failed: [] };
+  if (result.canceled || !result.filePaths.length) {
+    sendLibraryImportProgress(event, { phase: 'cancelled' });
+    return { files: [], copied: 0, alreadyOnShelf: 0, failed: [] };
+  }
+  const total = result.filePaths.length;
+  sendLibraryImportProgress(event, { phase: 'queued', total, names: result.filePaths.map(filePath => path.basename(filePath)) });
   const files = [];
   const failed = [];
   let copied = 0;
   let alreadyOnShelf = 0;
-  for (const selectedPath of result.filePaths) {
+  for (const [index, selectedPath] of result.filePaths.entries()) {
+    const name = path.basename(selectedPath);
+    sendLibraryImportProgress(event, { phase: 'copying', index, total, name });
     try {
       const source = await fs.promises.realpath(selectedPath);
       const stat = await fs.promises.stat(source);
       if (!stat.isFile() || !Object.hasOwn(mimeByExt, path.extname(source).toLowerCase())) {
-        failed.push(path.basename(selectedPath));
-        continue;
+        const unsupported = new Error('Unsupported video file type.');
+        unsupported.code = 'UNSUPPORTED_FILE';
+        throw unsupported;
       }
-      const stored = await copyFileIntoShelf(source, root);
-      if (stored.copied) copied += 1;
-      else alreadyOnShelf += 1;
-      files.push(registerMediaFile(stored.path));
+      sendLibraryImportProgress(event, { phase: 'copying', index, total, name, bytesTotal: stat.size });
+      const stored = await copyFileIntoShelf(source, root, {
+        onProgress: ({ copiedBytes, totalBytes }) => sendLibraryImportProgress(event, {
+          phase: 'copy-progress', index, total, name, copiedBytes, totalBytes
+        })
+      });
+      if (stored.copied) {
+        copied += 1;
+        sendLibraryImportProgress(event, { phase: 'copied', index, total, name });
+      } else {
+        alreadyOnShelf += 1;
+        sendLibraryImportProgress(event, { phase: 'already-on-shelf', index, total, name });
+      }
+      files.push({
+        ...registerMediaFile(stored.path),
+        managedLocalCopy: true,
+        sourcePath: stored.copied ? source : null
+      });
     } catch (error) {
       console.warn('A selected video could not be copied to the local shelf', error?.message || error);
-      failed.push(path.basename(selectedPath));
+      failed.push(name);
+      sendLibraryImportProgress(event, { phase: 'file-failed', index, total, name, message: importFailureReason(error) });
     }
   }
-  return { files, copied, alreadyOnShelf, failed };
+  sendLibraryImportProgress(event, { phase: 'finished', total, copied, alreadyOnShelf, failed: failed.length });
+  return { files, copied, alreadyOnShelf, failed, managedRoot: root };
 }
 
 function ffmpegExecutable() {
@@ -339,6 +782,33 @@ function ffmpegExecutable() {
     : path.join(__dirname, 'vendor', 'ffmpeg', 'ffmpeg');
   if (fs.existsSync(executable)) return executable;
   throw new Error(`The bundled FFmpeg decoder is missing at ${executable}. Restore the vendor/ffmpeg files before running this build.`);
+}
+
+function systemFFmpegExecutable() {
+  const searchDirectories = [
+    ...(process.platform === 'darwin' ? ['/opt/homebrew/bin', '/usr/local/bin'] : []),
+    ...(process.env.PATH || '').split(path.delimiter).filter(Boolean)
+  ];
+  for (const directory of new Set(searchDirectories)) {
+    const candidate = path.join(directory, 'ffmpeg');
+    try {
+      if (fs.statSync(candidate).isFile()) {
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return candidate;
+      }
+    } catch { /* Try the next standard or PATH location. */ }
+  }
+  return null;
+}
+
+function transcodeExecutableCandidates() {
+  let bundled = null;
+  try { bundled = ffmpegExecutable(); } catch { /* A complete system FFmpeg may still be available. */ }
+  const system = systemFFmpegExecutable();
+  const ordered = app.isPackaged ? [bundled, system] : [system, bundled];
+  const candidates = [...new Set(ordered.filter(Boolean))];
+  if (!candidates.length) ffmpegExecutable();
+  return candidates;
 }
 
 function runFFmpeg(executable, args) {
@@ -379,24 +849,40 @@ async function transcodeMedia(_event, id) {
   const job = (async () => {
     await fs.promises.mkdir(cacheDir, { recursive: true });
     const temporary = path.join(cacheDir, `${key}.${process.pid}.partial.mp4`);
-    const executable = ffmpegExecutable();
+    const executables = transcodeExecutableCandidates();
     const common = ['-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', source, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn'];
-    const tail = ['-pix_fmt', 'yuv420p', '-tag:v', 'avc1', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', temporary];
-    try {
-      await runFFmpeg(executable, [...common, '-c:v', 'h264_videotoolbox', '-b:v', '2500k', ...tail]);
-      const convertedStat = await fs.promises.stat(temporary);
-      if (convertedStat.size > MAX_TRANSCODE_CACHE_BYTES) throw new Error('Converted copy would exceed the 3 GB temporary-cache limit.');
-      await fs.promises.rename(temporary, output);
-      await trimTranscodeCache(cacheDir);
-      return output;
-    } catch (error) {
-      await fs.promises.unlink(temporary).catch(() => {});
-      throw new Error(`Could not make a browser-compatible copy. The file may be damaged or unsupported, or macOS H.264 encoding may be unavailable. ${String(error.message || error).slice(-220)}`);
+    const audioTail = ['-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', temporary];
+    const videoCodec = await commercialService.probeVideoCodec(source).catch(() => '');
+    let lastError = null;
+    for (const executable of executables) {
+      const attempts = videoCodec === 'h264'
+        ? [[...common, '-c:v', 'copy', ...audioTail], [...common, '-c:v', 'h264_videotoolbox', '-b:v', '2500k', '-pix_fmt', 'yuv420p', '-tag:v', 'avc1', ...audioTail]]
+        : [[...common, '-c:v', 'h264_videotoolbox', '-b:v', '2500k', '-pix_fmt', 'yuv420p', '-tag:v', 'avc1', ...audioTail]];
+      for (const args of attempts) {
+        try {
+          await runFFmpeg(executable, args);
+          const convertedStat = await fs.promises.stat(temporary);
+          if (convertedStat.size > MAX_TRANSCODE_CACHE_BYTES) throw new Error('Converted copy would exceed the 3 GB temporary-cache limit.');
+          await fs.promises.rename(temporary, output);
+          await trimTranscodeCache(cacheDir);
+          return output;
+        } catch (error) {
+          lastError = error;
+          await fs.promises.unlink(temporary).catch(() => {});
+        }
+      }
     }
+    throw new Error(`Could not make a browser-compatible copy. Tried ${executables.map(path.basename).join(' and ')}. The file may be damaged or unsupported, or macOS H.264 encoding may be unavailable. ${String(lastError?.message || lastError || '').slice(-220)}`);
   })();
   transcodeJobs.set(key, job);
   try { return registerMediaFile(await job); }
   finally { transcodeJobs.delete(key); }
+}
+
+async function getMediaAudioCodec(_event, id) {
+  const source = mediaFiles.get(id);
+  if (!source) throw new Error('That tape is no longer available.');
+  return commercialService.probeAudioCodec(source);
 }
 
 async function restoreVideos(paths) {
@@ -431,13 +917,20 @@ async function openSubtitle() {
 }
 
 function createWindow() {
+  const windowBoundsPath = path.join(app.getPath('userData'), 'window-bounds.json');
+  const restoredBounds = restoreWindowBounds(readWindowBounds(windowBoundsPath), {
+    displays: screen.getAllDisplays(),
+    primaryDisplay: screen.getPrimaryDisplay(),
+    defaultBounds: { width: 1280, height: 820 },
+    minWidth: 900,
+    minHeight: 640
+  });
   const win = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    ...restoredBounds,
     minWidth: 900,
     minHeight: 640,
     backgroundColor: '#11120f',
-    title: 'Saturday Tube',
+    title: app.getName(),
     // Show immediately; a stalled renderer must not leave only a bouncing Dock icon.
     show: true,
     webPreferences: {
@@ -446,6 +939,38 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true
     }
+  });
+  let boundsSaveTimer = null;
+  const saveWindowBounds = () => {
+    if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
+    boundsSaveTimer = null;
+    if (win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen()) return;
+    try {
+      writeWindowBounds(windowBoundsPath, win.getBounds());
+    } catch (error) {
+      logLaunch('window bounds could not be saved', error?.message || String(error));
+    }
+  };
+  const scheduleWindowBoundsSave = () => {
+    if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
+    boundsSaveTimer = setTimeout(saveWindowBounds, 250);
+    boundsSaveTimer.unref?.();
+  };
+  win.on('move', scheduleWindowBoundsSave);
+  win.on('resize', scheduleWindowBoundsSave);
+  win.on('enter-full-screen', () => {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('window-fullscreen-change', true);
+  });
+  win.on('leave-full-screen', () => {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('window-fullscreen-change', false);
+    scheduleWindowBoundsSave();
+  });
+  win.on('close', saveWindowBounds);
+  win.webContents.on('before-input-event', (event, input) => {
+    const modifier = process.platform === 'darwin' ? input.meta : input.control;
+    if (input.type !== 'keyDown' || !modifier || input.alt || input.shift || String(input.key).toLowerCase() !== 'f') return;
+    event.preventDefault();
+    win.setFullScreen(!win.isFullScreen());
   });
   let mainFrameLoaded = false;
   let fallbackShown = false;
@@ -463,12 +988,16 @@ function createWindow() {
   win.webContents.once('dom-ready', () => logLaunch('renderer DOM ready'));
   win.webContents.on('did-finish-load', () => {
     if (!fallbackShown) mainFrameLoaded = true;
+    win.webContents.send('window-fullscreen-change', win.isFullScreen());
     logLaunch('window load finished', win.webContents.getURL());
   });
   win.webContents.on('console-message', event => {
     if (event && event.level >= 2) {
       logLaunch('renderer console error', `${event.message} (${event.sourceId}:${event.lineNumber})`);
     }
+  });
+  win.webContents.on('preload-error', (_event, preloadPath, error) => {
+    logLaunch('renderer preload failed', `${preloadPath}: ${error?.stack || String(error)}`);
   });
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     logLaunch('window load failed', `${errorCode} ${errorDescription} ${validatedURL}`);
@@ -492,8 +1021,16 @@ function createWindow() {
   });
 }
 
+app.on('before-quit', () => commercialService?.stopWatchingFolder());
+
 app.whenReady().then(() => {
   logLaunch('Electron ready');
+  commercialService = new CommercialsService(path.join(app.getPath('userData'), 'Commercial Library'));
+  commercialService.startWatchingFolder(COMMERCIAL_SOURCE_ROOT, progress => {
+    sendCommercialProgress(null, progress);
+    if (progress.phase === 'watch-import-complete') logLaunch('commercial file added from watched folder', progress.title);
+    else if (progress.phase === 'watch-folder-unavailable') logLaunch('commercial source folder unavailable', progress.message);
+  });
   try {
     logLaunch('bundled FFmpeg decoder ready', ffmpegExecutable());
   } catch (error) {
@@ -523,14 +1060,63 @@ app.whenReady().then(() => {
       return new Response('The selected local file could not be read.', { status: 500, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
     }
   });
+  staticInputMedia = registerMediaFile(path.join(__dirname, 'assets', 'static', 'tv-static-4k-60fps.mp4'));
+  ipcMain.handle('get-static-input', () => staticInputMedia);
+  ipcMain.handle('get-movie-trailers', getMovieTrailers);
+  ipcMain.handle('choose-channel-folder', chooseChannelFolder);
+  ipcMain.handle('discover-sibling-channels', discoverSiblingChannels);
+  ipcMain.handle('restore-channel-folder', restoreChannelFolder);
+  ipcMain.handle('rescan-channel-folder', rescanChannelFolder);
+  ipcMain.handle('build-channel-round', buildChannelRound);
+  ipcMain.handle('reconcile-channel-playback', (_event, shows, commercials, savedState) => reconcileChannelPlayback(shows, commercials, savedState));
+  ipcMain.handle('get-commercial-library', getCommercialLibrary);
+  ipcMain.handle('import-commercial-compilation', importCommercialCompilation);
+  ipcMain.handle('analyze-commercial-breaks', analyzeCommercialBreaks);
+  ipcMain.handle('update-commercial-clip', (_event, id, patch) => commercialService.updateClip(id, patch));
+  ipcMain.handle('retime-commercial-clip', (_event, id, start, end) => commercialService.retimeClip(id, start, end));
   ipcMain.handle('restore-videos', (_event, paths) => restoreVideos(paths));
+  ipcMain.handle('get-managed-tape-shelf', async event => {
+    const root = await getManagedTapeShelf();
+    libraryRoots.set(event.sender.id, root);
+    return root;
+  });
+  ipcMain.handle('ensure-local-tape', ensureLocalTape);
+  ipcMain.handle('eject-managed-tape', ejectManagedTape);
   ipcMain.handle('transcode-media', transcodeMedia);
+  ipcMain.handle('get-media-audio-codec', getMediaAudioCodec);
+  ipcMain.on('channel-tune-metric', (_event, metric) => {
+    const allowedStages = new Set(['click', 'metadata', 'playing', 'first-frame', 'play-stalled', 'source-error', 'transcode-start', 'transcode-ready', 'transcode-error']);
+    if (!metric || !allowedStages.has(metric.stage)) return;
+    const channel = typeof metric.channel === 'string' ? metric.channel.slice(0, 48) : 'Unknown';
+    const source = typeof metric.source === 'string' ? metric.source.slice(0, 80) : '';
+    const elapsedMs = Number(metric.elapsedMs);
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > 1_800_000) return;
+    const details = { channel, stage: metric.stage, elapsedMs: Math.round(elapsedMs), ...(source ? { source } : {}) };
+    if (metric.stage === 'play-stalled') {
+      const boundedInteger = (value, maximum) => Math.max(0, Math.min(maximum, Math.trunc(Number(value) || 0)));
+      const boundedSeconds = value => {
+        const seconds = Number(value);
+        return Number.isFinite(seconds) ? Math.max(0, Math.min(172_800, seconds)) : 0;
+      };
+      Object.assign(details, {
+        readyState: boundedInteger(metric.readyState, 4),
+        networkState: boundedInteger(metric.networkState, 3),
+        errorCode: boundedInteger(metric.errorCode, 4),
+        currentTime: boundedSeconds(metric.currentTime),
+        duration: boundedSeconds(metric.duration)
+      });
+    }
+    logLaunch('channel tune timing', JSON.stringify(details));
+  });
   ipcMain.handle('choose-library-folder', chooseLibraryFolder);
   ipcMain.handle('restore-library-folder', restoreLibraryFolder);
   ipcMain.handle('browse-library-folder', (event, folderPath) => browseLibraryFolder(event, folderPath));
   ipcMain.handle('open-library-files', openLibraryFiles);
   ipcMain.handle('import-library-files', importLibraryFiles);
   ipcMain.handle('lookup-metadata', lookupMetadata);
+  ipcMain.on('parse-metadata-filename', (event, filename) => {
+    event.returnValue = parseMetadataFilename(filename);
+  });
   ipcMain.handle('open-subtitle', openSubtitle);
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

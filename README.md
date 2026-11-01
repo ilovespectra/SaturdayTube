@@ -29,7 +29,7 @@ Stop the development app with **Command-Q**, then run:
 npm run package:mac -- arm64
 ```
 
-The packaged app is written under `dist/`. Omit `arm64` to package for the Mac's current architecture. `npm ci` uses the committed lockfile, and `npm test` runs the built-in Node test runner without additional test dependencies.
+That builds an isolated test candidate under `dist/`. For a release that replaces the installed app and reuses its existing profile, run `npm run package:mac -- --release arm64`. Omit `arm64` to package for the Mac's current architecture. `npm ci` uses the committed lockfile, and `npm test` runs the built-in Node test runner without additional test dependencies.
 
 The local package is ad-hoc signed and is not notarized. This repository does not include Apple Developer credentials; macOS may require approval when opening the packaged app. FFmpeg is built from the included FFmpeg 8.0 source archive with GPL and version-3 components disabled; its LGPL 2.1 license and source archive ship inside the app bundle. Development mode is the shortest route to run this local copy. The cabinet finish gallery includes three locally bundled reference photographs; their sources and licenses are listed in `assets/materials/CREDITS.md`.
 

@@ -6,8 +6,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' saturday://app; img-src 'self' saturday://app data: https://static.tvmaze.com https://upload.wikimedia.org; media-src saturday://app; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' saturday://app">
   <title>Saturday Tube</title>
   <link rel="stylesheet" href="saturday://app/styles.css">
+  <link rel="stylesheet" href="saturday://app/commercials.css">
 </head>
-<body>
+<body data-input="video">
   <main class="room">
 
     <section id="tvSet" class="tv-set" aria-label="Saturday Tube television">
@@ -21,11 +22,14 @@
           <div class="screen-bezel">
             <div id="stage" class="stage empty">
               <video id="video" playsinline preload="metadata" crossorigin="anonymous"></video>
-              <canvas id="picture" aria-label="CRT video picture"></canvas>
+              <video id="staticPicture" class="static-picture" playsinline loop preload="metadata" aria-hidden="true"></video>
+              <canvas id="picture" aria-label="CRT picture: A little Saturday magic."></canvas>
               <div class="glass"></div>
+              <div class="crt-glass" aria-hidden="true"></div>
               <div id="caption" class="caption"></div>
+              <div id="channelSurfOverlay" class="channel-surf-overlay" hidden aria-live="polite" aria-atomic="true"></div>
+              <div id="searchingIndicator" class="searching-indicator" hidden aria-live="polite"><span class="searching-dot"></span> SEARCHING...</div>
               <div id="emptyState" class="empty-state"><div class="tv-icon">▶</div><div class="empty-title">A little Saturday magic</div><div class="empty-copy">Open the tape shelf from the VHS loader at right</div></div>
-              <div class="screen-corner"><span id="fileExtensionBadge" class="file-extension-badge" hidden></span></div>
             </div>
           </div>
           <div class="transport under-screen" aria-label="Playback controls">
@@ -35,13 +39,33 @@
             <span id="timeCurrent" class="time">0:00</span>
             <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Playback position">
             <span id="timeDuration" class="time">0:00</span>
-            <button id="muteButton" class="transport-key mute-key" type="button" aria-label="Mute or unmute" aria-pressed="false">♫</button>
           </div>
         </section>
 
         <aside class="control-panel" aria-label="Television controls and playlists">
           <div class="panel-label compact-panel-heading"><span>PICTURE CONTROLS</span><span>ST-90</span></div>
           <div class="dial-bank primary-dials">
+            <section class="channel-surf-control" aria-label="Channel">
+              <div class="channel-surf-heading"><span>CHANNEL</span><strong id="channelSurfName" aria-live="polite">NO CHANNEL</strong></div>
+              <div class="channel-surf-buttons rocker-buttons" role="group" aria-label="Change TV channel">
+                <button id="channelDownButton" type="button" aria-label="Decrease channel" title="Decrease channel" disabled><span class="rocker-label">CH−</span></button>
+                <button id="channelUpButton" type="button" aria-label="Increase channel" title="Increase channel" disabled><span class="rocker-label">CH+</span></button>
+              </div>
+              <div class="channel-tools">
+                <button id="addChannelButton" type="button" title="Choose a channel folder" aria-label="Add a channel folder">＋</button>
+                <button id="rescanChannelButton" type="button" title="Rescan the active channel folder" aria-label="Rescan active channel folder" disabled>↻</button>
+              </div>
+              <div id="channelStatus" class="channel-status-line" aria-live="polite">NO CHANNELS SET UP</div>
+              <div id="channelRootPath" class="channel-root-path">Choose a folder with one subfolder per show and an optional Commercials subfolder.</div>
+              <div id="channelSummary" class="channel-summary">Folders stay where they are; Saturday Tube reads episodes and channel-only commercials in place.</div>
+            </section>
+            <section class="volume-rocker-control" aria-label="Volume">
+              <div class="volume-rocker-heading"><span>VOLUME</span><output id="volumeArrowReadout">82%</output></div>
+              <div class="volume-rocker-buttons rocker-buttons" role="group" aria-label="Adjust volume">
+                <button id="volumeDownButton" type="button" aria-label="Turn volume down" title="Turn volume down"><span class="rocker-label">VOL−</span></button>
+                <button id="volumeUpButton" type="button" aria-label="Turn volume up" title="Turn volume up"><span class="rocker-label">VOL+</span></button>
+              </div>
+            </section>
             <div class="dial-control"><span class="dial-name">VOLUME</span><span class="dial-output" id="volumeReadout">82%</span><button id="volume" class="dial" type="button" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="82" aria-valuetext="82 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
             <div class="dial-control"><span class="dial-name">SCANLINES</span><span class="dial-output" id="scanlinesReadout">3%</span><button id="scanlines" class="dial" type="button" role="slider" aria-label="Scanline strength" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
             <div class="dial-control"><span class="dial-name">CURVATURE</span><span class="dial-output" id="curveReadout">3%</span><button id="curve" class="dial" type="button" role="slider" aria-label="Screen curvature" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
@@ -62,7 +86,11 @@
             <label class="signal-control audio-effect-select"><span>TAPE DECK FX</span><select id="audioEffectSelect" aria-label="Tape deck audio effect"><option value="clean">CLEAN</option><option value="vhs">VHS</option><option value="hum">CATHODE HUM</option><option value="am">AM RADIO</option><option value="lofi">LO-FI</option><option value="wow">TAPE WOBBLE</option></select></label>
             <div class="audio-effect-controls">
               <div class="dial-control fx-amount-control"><span class="dial-name">FX MIX</span><span class="dial-output" id="fxAmountReadout">3%</span><button id="fxAmount" class="dial" type="button" role="slider" aria-label="Audio effect mix" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
-              <div class="bypass-row audio-bypass-row"><span>AUDIO BYPASS</span><button id="audioBypassToggle" class="power-switch" type="button" aria-label="Bypass audio effects" aria-pressed="false"><i></i></button></div>
+              <div class="bypass-row audio-bypass-row"><span>FX BYPASS</span><button id="audioBypassToggle" class="power-switch" type="button" aria-label="Bypass audio effects; movie audio stays enabled" aria-pressed="false"><i></i></button></div>
+            </div>
+            <div class="sound-fx-controls">
+              <label class="sound-fx-volume"><span>SOUND FX</span><input id="soundEffectsVolume" type="range" min="0" max="400" value="100" aria-label="Sound effects volume"><output id="soundEffectsReadout" for="soundEffectsVolume">100%</output></label>
+              <div class="bypass-row sound-fx-toggle"><span>ON</span><button id="soundEffectsToggle" class="power-switch on" type="button" aria-label="Turn sound effects off" aria-pressed="true"><i></i></button></div>
             </div>
           </section>
           <section class="finish-panel" aria-label="Cabinet finish">
@@ -78,6 +106,7 @@
           <section class="signal-settings" aria-label="Picture display settings">
             <label class="signal-control"><span>PICTURE MODE</span><select id="pictureMode" aria-label="Picture color mode"><option value="color">COLOR</option><option value="lowstim">LOWSTIM</option><option value="bw">B&amp;W</option></select></label>
             <label class="signal-control"><span>DISPLAY TYPE</span><select id="displayMode" aria-label="Video display effect"><option value="crt">CRT</option><option value="rear">REAR PROJECTION</option></select></label>
+            <div class="signal-control input-source-control"><span>INPUT</span><button id="inputButton" type="button" aria-label="Cycle input: video, static, TV" aria-pressed="false">VIDEO</button></div>
             <div class="bypass-row picture-bypass-row"><span>PICTURE FILTER BYPASS</span><button id="pictureBypassToggle" class="power-switch" type="button" aria-label="Bypass picture effects" aria-pressed="false"><i></i></button></div>
           </section>
           <section class="view-section" aria-label="Fullscreen view">
@@ -92,22 +121,33 @@
             <div class="playlist-tools"><select id="playlistSelect" aria-label="Select playlist"></select><button id="newPlaylistButton" type="button" title="Create a new playlist" aria-label="Create a new playlist">＋</button><button id="deletePlaylistButton" type="button" title="Delete playlist; media files stay on disk" aria-label="Delete this playlist">−</button></div>
             <input id="playlistName" class="playlist-name" type="text" maxlength="48" aria-label="Playlist name" autocomplete="off">
             <ol id="playlistItems" class="playlist-items" aria-label="Tapes in this playlist"></ol>
-            <div class="playlist-hint">TAP A TAPE TO PLAY</div>
+            <div class="playlist-hint">TAP TO PLAY · ⏏ EJECTS TAPE</div>
           </section>
           <section class="deck-module" aria-label="Integrated VHS player controls">
             <header class="deck-module-heading"><span>VIDEO CASSETTE DECK</span><span class="deck-display"><i class="deck-led"></i><span id="deckState">TAPE READY</span></span></header>
+            <span class="deck-brand" aria-label="Symphonic-inspired deck styling">Symphonic</span>
             <div class="deck-insert-row">
               <button id="openButton" class="cassette-port" type="button" title="Open your local tape shelf" aria-label="Open tape library">
-                <span class="vhs-slot-door"><i class="vhs-slot-window"></i><i class="vhs-slot-lip"></i><i class="vhs-slot-eject"></i></span>
+                <span class="vhs-slot-door"><span class="vhs-slot-spec" aria-hidden="true">19 MICRON · 4 HEAD · VHS HQ</span><i class="vhs-slot-window"></i><i class="vhs-slot-lip"></i><i class="vhs-slot-eject"></i></span>
                 <span class="slot-caption"><b>VHS CASSETTE LOADER</b><small>OPEN TAPE SHELF</small></span>
               </button>
             </div>
             <div class="deck-options">
-              <label class="track-control"><span>AUDIO</span><select id="audioTracks" disabled><option>Automatic</option></select></label>
-              <label class="track-control"><span>CAPTIONS</span><select id="subtitleTracks" disabled><option>Off</option></select></label>
+              <label class="track-control"><span>AUDIO OUTPUT</span><select id="audioOutput" aria-label="Audio output source"><option value="default">System default</option><option value="choose">Choose output device…</option></select></label>
+              <label class="track-control"><span>CAPTIONS</span><select id="subtitleTracks" aria-label="Captions"><option value="off">Off</option><option value="load">Load captions…</option></select></label>
               <button id="subtitleButton" class="subtitle-load" type="button">＋ LOAD SRT / VTT</button>
             </div>
+            <div class="commercial-controls" aria-label="Commercial playback mode">
+              <button id="commercialModeToggle" class="commercial-mode-toggle" type="button" aria-pressed="false">WITH COMMERCIALS · OFF</button>
+              <button id="commercialManageButton" class="commercial-manage-button" type="button">MANAGE ADS</button>
+              <span id="commercialStatus" class="commercial-status" aria-live="polite">0 ADS SAVED</span>
+            </div>
           </section>
+          <div class="simple-tv-controls" aria-label="TV controls">
+            <button id="tvGuideButton" type="button" class="tv-guide-button" aria-label="Open TV Guide" title="TV Guide"><span class="tv-guide-logo" aria-hidden="true"><b>TV</b><b>GUIDE</b></span></button>
+            <button id="audioRcaButton" type="button" class="audio-rca-button" aria-label="Open audio settings" title="Audio settings"><span class="rca-jacks" aria-hidden="true"><i class="rca-socket rca-video"></i><i class="rca-socket rca-left-audio"></i><i class="rca-socket rca-right-audio"></i></span><small>AUDIO</small></button>
+            <button id="tvSettingsButton" type="button" class="tv-settings-button" aria-label="Open TV settings" title="TV Settings"><span class="settings-gear" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M19.14 12.94a7.93 7.93 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.28 7.28 0 0 0-1.63-.95l-.36-2.54A.5.5 0 0 0 13.89 2h-3.78a.5.5 0 0 0-.49.42L9.26 4.96c-.58.23-1.13.55-1.63.95l-2.39-.96a.5.5 0 0 0-.61.22L2.71 8.49a.5.5 0 0 0 .12.64l2.03 1.58a7.93 7.93 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.5.4 1.05.72 1.63.95l.36 2.54c.03.24.24.42.49.42h3.78c.25 0 .46-.18.49-.42l.36-2.54c.58-.23 1.13-.55 1.63-.95l2.39.96c.22.09.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg></span><small>SETTINGS</small></button>
+          </div>
         </aside>
       </div>
 
@@ -115,19 +155,42 @@
     <div id="status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
   </main>
 
+  <dialog id="tvGuideDialog" class="screen-osd guide-osd" aria-labelledby="tvGuideTitle">
+    <header class="osd-titlebar guide-titlebar"><div class="guide-masthead"><span class="guide-title-logo" aria-hidden="true"><b>TV</b><b>GUIDE</b></span><div><strong id="tvGuideTitle">SATURDAY TUBE · TV GUIDE</strong><small id="tvGuidePage">PAGE 0 / 0</small></div></div><button id="tvGuideClose" class="osd-close" type="button" aria-label="Close TV Guide">×</button></header>
+    <div id="tvGuidePageContent" class="tv-guide-page" aria-live="polite"></div>
+    <footer class="osd-actions guide-actions"><button id="tvGuidePrevious" type="button">◀ PREVIOUS</button><button id="tvGuideAdd" type="button">＋ ADD CHANNEL</button><button id="tvGuideNext" type="button">NEXT ▶</button></footer>
+  </dialog>
+  <dialog id="tvSettingsDialog" class="screen-osd tv-settings-osd" aria-labelledby="tvSettingsTitle">
+    <header class="osd-titlebar"><div><strong id="tvSettingsTitle">TV SETTINGS</strong><small>AUDIO · VIDEO</small></div><button id="tvSettingsClose" class="osd-close" type="button" aria-label="Close TV Settings">×</button></header>
+    <nav class="settings-box-tabs" aria-label="TV settings pages"><button type="button" data-settings-tab="audio">AUDIO</button><button type="button" data-settings-tab="video" aria-current="page">VIDEO</button></nav>
+    <div class="tv-settings-body">
+      <section id="tvSettingsVideo" class="settings-pane" aria-label="Video, cabinet, and display settings"></section>
+      <section id="tvSettingsAudio" class="settings-pane" aria-label="Audio settings"></section>
+    </div>
+    <footer class="osd-actions"><button id="tvSettingsCloseFooter" type="button">CLOSE</button></footer>
+  </dialog>
   <dialog id="libraryDialog" class="library-dialog" aria-labelledby="libraryTitle">
     <header class="library-titlebar">
       <div class="library-window-lights" aria-hidden="true"><i></i><i></i><i></i></div>
-      <div><strong id="libraryTitle">TAPE LIBRARY</strong><small id="libraryDestination">SHELF NOT SET · IMPORTS COPY HERE</small></div>
+      <div><strong id="libraryTitle">TAPE LIBRARY</strong><small id="libraryDestination">LOCAL MAC SHELF · ORIGINALS KEPT</small></div>
       <button id="libraryCloseButton" class="library-close" type="button" aria-label="Close tape library">×</button>
     </header>
     <div class="library-toolbar">
-      <button id="libraryFolderButton" class="library-folder-button" type="button">SET SHELF DESTINATION…</button>
+      <button id="libraryFolderButton" class="library-folder-button" type="button">BROWSE SOURCE FOLDER…</button>
       <button id="libraryAddFileButton" class="library-folder-button" type="button">IMPORT TAPES…</button>
       <button id="libraryUpButton" class="library-up-button" type="button" aria-label="Go up one folder" disabled>↑</button>
       <nav id="libraryBreadcrumbs" class="library-breadcrumbs" aria-label="Current folder"><span>Choose a folder to start your shelves</span></nav>
       <input id="librarySearch" type="search" placeholder="Find a tape…" aria-label="Search visible tapes" autocomplete="off">
     </div>
+    <div id="libraryActivity" class="library-activity" hidden aria-live="polite" aria-busy="false"><span id="libraryActivityText"></span></div>
+    <section id="libraryImportProgress" class="library-import-progress" hidden aria-live="polite" aria-busy="false" aria-label="Tape import progress">
+      <div class="library-import-heading">
+        <div><strong id="libraryImportTitle">TAPE IMPORT</strong><small id="libraryImportSummary">Copies go to this Mac; originals stay untouched.</small></div>
+        <button id="libraryImportClear" type="button" aria-label="Dismiss import progress" disabled>×</button>
+      </div>
+      <progress id="libraryImportMeter" max="100" value="0" aria-label="Overall tape import progress"></progress>
+      <ol id="libraryImportItems" class="library-import-items"></ol>
+    </section>
     <div class="library-reelbar"><span>VIDEO CASSETTES</span><span id="libraryCount">SHELVES EMPTY</span></div>
     <div id="libraryShelves" class="library-shelves" aria-live="polite">
       <div class="library-empty"><span class="empty-reel">◉</span><strong>THE SHELVES ARE WAITING</strong><p>Choose a folder on this Mac. Saturday Tube will show its folders and playable files as a little tape shop.</p></div>
@@ -137,6 +200,22 @@
       <div><button id="libraryCancelButton" class="library-cancel" type="button">CLOSE</button><button id="libraryAddButton" class="library-add" type="button" disabled>QUEUE &amp; PLAY</button></div>
     </footer>
   </dialog>
+
+  <dialog id="commercialDialog" class="commercial-dialog" aria-labelledby="commercialTitle">
+    <header class="commercial-dialog-header">
+      <div><h2 id="commercialTitle">LOCAL COMMERCIAL LIBRARY</h2><p>Original compilations stay intact; clips and fade points live on this Mac.</p></div>
+      <button id="commercialCloseButton" class="commercial-dialog-close" type="button" aria-label="Close commercial library">×</button>
+    </header>
+    <div class="commercial-manager-toolbar">
+      <button id="commercialAddButton" type="button">＋ ADD COMPILATION…</button>
+      <span id="commercialSourceSummary" class="commercial-source-summary">No compilations yet.</span>
+    </div>
+    <div id="commercialProgress" class="commercial-progress" hidden aria-live="polite" aria-busy="false"></div>
+    <div id="commercialLibrarySummary" class="commercial-library-summary">0 playable · 0 boundaries flagged for review</div>
+    <div id="commercialClipList" class="commercial-clip-list" aria-label="Saved commercials"></div>
+  </dialog>
+  <script src="saturday://app/movie-preroll.js"></script>
   <script src="saturday://app/renderer.js"></script>
+  <script src="saturday://app/commercial-mode.js"></script>
 </body>
 </html>

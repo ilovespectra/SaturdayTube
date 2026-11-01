@@ -1,0 +1,42 @@
+/* Saturday Tube's optional, persistent ad-break controls. */
+.commercial-controls { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:5px; margin-top:6px; padding:6px; border:1px solid var(--case-border,#755032); border-radius:5px; background:linear-gradient(#ffffff0b,#0003),var(--case-inset,#24170f); }
+.commercial-mode-toggle,.commercial-manage-button,.commercial-review-button,.commercial-recut-button { min-height:24px; padding:4px 7px; color:var(--case-text,#f4e8d0); border:1px solid var(--case-border,#86633a); border-radius:4px; background:linear-gradient(#ffffff18,#0005),var(--case-panel,#33271d); font:700 6px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.055em; cursor:pointer; }
+.commercial-mode-toggle { width:100%; color:#e6d6b4; text-align:left; }
+.commercial-mode-toggle.is-on { color:#eaffd5; border-color:#9dc77d; box-shadow:0 0 7px #9dc77d44,inset 0 0 5px #9dc77d22; }
+.commercial-manage-button { white-space:nowrap; }
+.commercial-status { grid-column:1/-1; min-width:0; overflow:hidden; color:var(--case-muted,#d1b58b); font:5px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.04em; text-overflow:ellipsis; white-space:nowrap; }
+.commercial-dialog { width:min(800px,94vw); max-width:94vw; max-height:88vh; padding:0; overflow:hidden; color:#ead9b5; border:2px solid #785733; border-radius:12px; background:linear-gradient(145deg,#32251a,#1b140f 55%,#291d14); box-shadow:0 20px 80px #000d; }
+.commercial-dialog::backdrop { background:#060706bb; backdrop-filter:blur(3px); }
+.commercial-dialog-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 16px; border-bottom:1px solid #745331; background:linear-gradient(#ffffff11,#0003); }
+.commercial-dialog-header h2 { margin:0; color:#ffe8b7; font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.1em; }
+.commercial-dialog-header p { margin:4px 0 0; color:#cdb38a; font:10px/1.4 ui-sans-serif,-apple-system,sans-serif; }
+.commercial-dialog-close { width:30px; height:30px; color:#f1d5a8; border:1px solid #805c37; border-radius:6px; background:#261b12; font-size:20px; cursor:pointer; }
+.commercial-manager-toolbar { display:flex; align-items:center; gap:9px; padding:12px 16px; border-bottom:1px solid #654829; }
+.commercial-manager-toolbar button { min-height:31px; padding:6px 11px; color:#ffe8ba; border:1px solid #9a7145; border-radius:5px; background:linear-gradient(#755536,#4b351f); font:700 9px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.06em; cursor:pointer; }
+.commercial-manager-toolbar button:disabled { opacity:.55; cursor:progress; }
+.commercial-source-summary { min-width:0; overflow:hidden; color:#c5aa7f; font:9px/1.4 ui-sans-serif,-apple-system,sans-serif; text-overflow:ellipsis; }
+.commercial-progress { padding:7px 16px; color:#e8d6ad; border-bottom:1px solid #654829; background:#a47a3518; font:9px/1.4 ui-sans-serif,-apple-system,sans-serif; }
+.commercial-progress[hidden] { display:none; }
+.commercial-library-summary { padding:9px 16px; color:#cfb789; border-bottom:1px solid #654829; font:9px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.04em; }
+.commercial-clip-list { display:grid; gap:6px; max-height:calc(88vh - 180px); padding:10px 14px 14px; overflow:auto; }
+.commercial-empty { margin:18px 8px; color:#cdb38a; font:12px/1.5 ui-sans-serif,-apple-system,sans-serif; text-align:center; }
+.commercial-clip { display:grid; gap:7px; padding:9px 10px; border:1px solid #654829; border-radius:7px; background:linear-gradient(#ffffff08,#0002),#21180f; }
+.commercial-clip[data-review="true"] { border-color:#a77a37; box-shadow:inset 3px 0 #d49d45; }
+.commercial-clip-heading { display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; gap:8px; }
+.commercial-clip-title { min-width:0; padding:4px 6px; color:#f4e5c8; border:1px solid #63472b; border-radius:4px; background:#17110c; font:600 10px ui-sans-serif,-apple-system,sans-serif; }
+.commercial-clip-duration,.commercial-confidence { color:#d5bd91; font:8px ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; }
+.commercial-confidence { color:#9fc67b; }
+.commercial-clip[data-review="true"] .commercial-confidence { color:#efc06e; }
+.commercial-clip-controls { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.commercial-check { display:flex; align-items:center; gap:5px; color:#d6c19d; font:8px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.commercial-check input { accent-color:#a8d681; }
+.commercial-review-button { min-height:22px; font-size:7px; }
+.commercial-clip-details { padding-top:4px; border-top:1px solid #563c22; }
+.commercial-clip-details summary { color:#d6ba8b; cursor:pointer; font:7px ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.06em; }
+.commercial-clip-details video { display:block; width:min(100%,420px); max-height:230px; margin:9px auto; border:1px solid #735231; border-radius:5px; background:#090807; }
+.commercial-cut-fields { display:grid; grid-template-columns:auto minmax(85px,1fr) auto minmax(85px,1fr) auto; align-items:end; gap:7px; padding:5px 0 2px; color:#cdb48b; font:7px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.commercial-cut-fields input { width:100%; min-width:0; height:25px; padding:3px 5px; color:#f2e4c8; border:1px solid #775638; border-radius:4px; background:#110d09; font:9px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.commercial-recut-button { min-height:25px; white-space:nowrap; }
+.commercial-progress[aria-busy="true"] { animation:commercial-progress-glow 1.6s ease-in-out infinite alternate; }
+@keyframes commercial-progress-glow { from { background-color:#a47a3518; } to { background-color:#c28f3838; } }
+@media (max-width:560px) { .commercial-dialog { width:96vw; max-width:96vw; } .commercial-manager-toolbar { align-items:flex-start; flex-direction:column; } .commercial-cut-fields { grid-template-columns:1fr 1fr; } .commercial-cut-fields label { align-self:end; } .commercial-recut-button { grid-column:1/-1; } .commercial-clip-heading { grid-template-columns:minmax(0,1fr) auto; } .commercial-confidence { grid-column:1/-1; } }

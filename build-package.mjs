@@ -5,7 +5,9 @@ import { access, readFile } from 'node:fs/promises';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-const arch = process.argv[2] || process.arch;
+const arch = process.argv.slice(2).find(argument => ['arm64', 'x64'].includes(argument)) || process.arch;
+const releaseBuild = process.argv.includes('--release');
+const bundleName = releaseBuild ? 'Saturday Tube' : 'Saturday Tube Candidate';
 if (!['arm64', 'x64'].includes(arch)) {
   throw new Error(`Unsupported macOS architecture: ${arch}. Use arm64 or x64.`);
 }
@@ -28,9 +30,9 @@ function optionsForSignedApp(filePath) {
 try {
   const paths = await packager({
     dir: root,
-    name: 'Saturday Tube',
-    // Give the test candidate its own Launch Services identity and profile.
-    appBundleId: 'com.ilovespectra.saturdaytube.candidate',
+    name: bundleName,
+    // Keep QA isolated while release replacement retains the installed app identity.
+    appBundleId: releaseBuild ? 'com.ilovespectra.saturdaytube' : 'com.ilovespectra.saturdaytube.candidate',
     appVersion: packageJson.version,
     appCopyright: 'Copyright Saturday Tube',
     platform: 'darwin',
@@ -44,7 +46,7 @@ try {
     // Ad-hoc signing seals the renamed app on this Mac without a Developer ID.
     osxSign: { identity: '-', identityValidation: false, optionsForFile: optionsForSignedApp },
     osxNotarize: false,
-    ignore: [/node_modules/, /package-lock[.]json$/, /build-package.*[.](?:cjs|mjs)$/, /(^|[\\/])test([\\/]|$)/, /(^|[\\/])dist([\\/]|$)/, /(^|[\\/])README[.]md$/, /assets[\\/]static([\\/]|$)/, /assets[\\/]audio([\\/]|$)/, /vendor[\\/]ffmpeg([\\/]|$)/]
+    ignore: [/node_modules/, /package-lock[.]json$/, /build-package.*[.](?:cjs|mjs)$/, /(^|[\\/])test([\\/]|$)/, /(^|[\\/])dist([\\/]|$)/, /(^|[\\/])README[.]md$/, /vendor[\\/]ffmpeg([\\/]|$)/]
   });
   for (const p of paths) console.log(path.resolve(p));
 } catch (error) {
