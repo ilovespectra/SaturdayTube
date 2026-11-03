@@ -8,6 +8,8 @@ const {
   mergeBlackIntervals,
   chooseProgramBreaks,
   createCommercialSegments,
+  markQuietBlacks,
+  parseSilenceIntervals,
   targetCommercialSeconds,
   shouldUseBoundaryBreak
 } = require('../commercials-service.cjs');
@@ -122,6 +124,27 @@ test('split segments omit the black transition and flag short or uncertain clips
   assert.equal(segments[2].enabled, true);
 });
 
+test('reels split only where black meets a pause in the sound', () => {
+  const stderr = [
+    '[silencedetect @ 0x1] silence_start: 29.8',
+    '[silencedetect @ 0x1] silence_end: 30.4 | silence_duration: 0.6',
+    '[silencedetect @ 0x1] silence_start: 89.9'
+  ].join('\n');
+  const silences = parseSilenceIntervals(stderr, 91);
+  assert.deepEqual(silences, [{ start: 29.8, end: 30.4 }, { start: 89.9, end: 91 }]);
+  // A 30 s spot, then a 60 s spot that fades to black at 45 s while its voice-over continues.
+  const blacks = markQuietBlacks([{ start: 30, end: 30.2 }, { start: 45, end: 45.3 }], silences);
+  assert.deepEqual(blacks.map(item => item.quiet), [true, false]);
+  const segments = createCommercialSegments(90, blacks);
+  assert.deepEqual(segments.map(item => [item.sourceStart, item.sourceEnd]), [[0, 30], [30.2, 90]], 'the fade inside the spot is not a split');
+
+  const silentReel = Array.from({ length: 5 }, (_, index) => ({ start: 30 * (index + 1), end: 30 * (index + 1) + 0.2, quiet: false }));
+  const rejoined = createCommercialSegments(180, silentReel);
+  assert.equal(rejoined.length, 3);
+  assert.ok(rejoined.every(item => item.durationSeconds <= 62), 'a reel with no quiet gaps still splits into spot-sized clips');
+  assert.equal(markQuietBlacks([{ start: 1, end: 2 }], null)[0].quiet, undefined, 'files without sound split on black alone');
+});
+
 test('completed source paths are available to TV without leaking through the library summary', async () => {
   const root = await fs.mkdtemp(path.join(__dirname, '..', `.saturday-commercial-sources-${process.pid}-`));
   try {
@@ -133,7 +156,7 @@ test('completed source paths are available to TV without leaking through the lib
     );
     await service.save();
     const sources = await service.listChannelSources();
-    assert.deepEqual(sources, [{ id: 'ready-source', status: 'complete', originalPath: '/channel/Commercials/ad.mp4', sizeBytes: 123, mtimeMs: 456 }]);
+    assert.deepEqual(sources, [{ id: 'ready-source', status: 'complete', originalPath: '/channel/Commercials/ad.mp4', sizeBytes: 123, mtimeMs: 456, clipCount: undefined, splitVersion: 0 }]);
     const library = await service.listLibrary();
     assert.equal(library.sources[0].originalPath, undefined);
   } finally {

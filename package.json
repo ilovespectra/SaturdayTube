@@ -7,8 +7,9 @@
   "private": true,
   "scripts": {
     "dev": "electron .",
-    "start": "npm run dev",
+    "start": "node ./start.js",
     "test": "node --test",
+    "parse-commercials": "node ./commercial-parser.cjs",
     "package:mac": "node build-package.mjs",
     "package:release:mac": "node build-package.mjs --release"
   },

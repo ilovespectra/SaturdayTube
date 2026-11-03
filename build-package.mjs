@@ -46,7 +46,7 @@ try {
     // Ad-hoc signing seals the renamed app on this Mac without a Developer ID.
     osxSign: { identity: '-', identityValidation: false, optionsForFile: optionsForSignedApp },
     osxNotarize: false,
-    ignore: [/node_modules/, /package-lock[.]json$/, /build-package.*[.](?:cjs|mjs)$/, /(^|[\\/])test([\\/]|$)/, /(^|[\\/])dist([\\/]|$)/, /(^|[\\/])README[.]md$/, /vendor[\\/]ffmpeg([\\/]|$)/]
+    ignore: [/node_modules/, /package-lock[.]json$/, /build-package.*[.](?:cjs|mjs)$/, /(^|[\\/])test([\\/]|$)/, /(^|[\\/])dist([\\/]|$)/, /(^|[\\/])tools([\\/]|$)/, /(^|[\\/])README[.]md$/, /vendor[\\/]ffmpeg([\\/]|$)/]
   });
   for (const p of paths) console.log(path.resolve(p));
 } catch (error) {

@@ -12,16 +12,17 @@ const main = readFileSync(path.join(root, 'main.cjs'), 'utf8');
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const preload = readFileSync(path.join(root, 'preload.cjs'), 'utf8');
 const shelfStorage = readFileSync(path.join(root, 'shelf-storage.cjs'), 'utf8');
+const appIdentity = readFileSync(path.join(root, 'app-identity.cjs'), 'utf8');
 
-test('Picture Lab exposes seven adjustable effects including Glow and Glare', () => {
+test('Picture Lab exposes seven adjustable effects including Glow and Brightness', () => {
   assert.match(html, /<span>PICTURE LAB<\/span><span>7 DIALS<\/span>/);
-  for (const dial of ['edgeBlur', 'hue', 'vhsScan', 'glitch', 'brokenTape', 'glow', 'glare']) {
+  for (const dial of ['edgeBlur', 'hue', 'vhsScan', 'glitch', 'brokenTape', 'glow', 'brightness']) {
     assert.match(html, new RegExp(`id="${dial}"`));
     assert.match(renderer, new RegExp(`document\\.querySelector\\('#${dial}'\\)`));
   }
-  assert.match(renderer, /const pictureDials = \[scanlineDial, curveDial, edgeBlurDial, hueDial, vhsScanDial, glitchDial, brokenTapeDial, glowDial, glareDial\]/);
+  assert.match(renderer, /const pictureDials = \[scanlineDial, curveDial, edgeBlurDial, hueDial, vhsScanDial, glitchDial, brokenTapeDial, glowDial, brightnessDial\]/);
   assert.match(renderer, /uniform float glow/);
-  assert.match(renderer, /uniform float glare/);
+  assert.doesNotMatch(renderer, /glare/i, 'the fake glass glare is gone');
   assert.match(renderer, /col\+=bloom\*glow\*0\.42/);
   assert.match(renderer, /getUniformLocation\(glProgram, 'glow'\)/);
   assert.match(renderer, /Object\.fromEntries\(allDials\.map/);
@@ -47,7 +48,7 @@ test('later redesign-only sections stay absent while TV OSD controls are present
   assert.match(html, /id="audioRcaButton"[\s\S]*?id="tvSettingsDialog"/i);
   assert.doesNotMatch(html, /id="audioSettingsDialog"/i);
   assert.match(renderer, /selectSettingsTab\('audio'\); showScreenDialog\(tvSettingsDialog\)/);
-  assert.doesNotMatch(html, /AUX|STATIC SECTION/i);
+  assert.doesNotMatch(html, /AUX SECTION|STATIC SECTION/i);
   assert.doesNotMatch(html, /screen-corner|fileExtensionBadge/);
   assert.doesNotMatch(html, /NTSC\s*[·.]\s*60\s*HZ/i);
   assert.match(html, /class="playlist-panel"/);
@@ -87,11 +88,15 @@ test('playback, captions, saved playlists, and preferences retain the historical
   assert.match(main, /h264_videotoolbox/);
   assert.doesNotMatch(main, /libx264/);
   assert.doesNotMatch(main, /\/opt\/homebrew\/bin\/ffmpeg|\/usr\/local\/bin\/ffmpeg/);
-  assert.match(main, /app\.isPackaged \? app\.getName\(\) : 'Saturday Tube Dev'/);
+  assert.match(main, /const appIdentity = configureAppIdentity\(\{ app \}\)/);
+  assert.ok(main.indexOf('configureAppIdentity({ app })') < main.indexOf("require('./shelf-storage.cjs')"));
+  assert.match(appIdentity, /app\.setName\(displayName\);[\s\S]*?app\.setPath\('userData', userDataPath\)/);
   assert.match(main, /path\.join\(process\.resourcesPath, 'ffmpeg'\)/);
   assert.match(main, /path\.join\(__dirname, 'vendor', 'ffmpeg', 'ffmpeg'\)/);
   assert.match(renderer, /window\.tube\.transcodeMedia\(track\.id\)/);
-  assert.match(main, /MAX_TRANSCODE_CACHE_BYTES = 3 \* 1024 \*\* 3/);
+  assert.match(main, /MAX_TRANSCODE_FILE_BYTES = 8 \* 1024 \*\* 3/);
+  assert.match(main, /MAX_TRANSCODE_CACHE_BYTES = 16 \* 1024 \*\* 3/);
+  assert.match(main, /MIN_FREE_DISK_BYTES = 8 \* 1024 \*\* 3/);
 });
 
 test('release metadata targets the next 0.8 patch and keeps the ARM build path', () => {
@@ -104,24 +109,11 @@ test('release metadata targets the next 0.8 patch and keeps the ARM build path',
   assert.match(build, /releaseBuild \? 'com\.ilovespectra\.saturdaytube' : 'com\.ilovespectra\.saturdaytube\.candidate'/);
 });
 
-test('shows the current file extension in the CRT overlay for two seconds', () => {
+test('the picture carries no file-extension label now that channels name themselves', () => {
   assert.doesNotMatch(html, /fileExtensionBadge/);
-  assert.match(renderer, /let visibleFileExtension = ''/);
-  assert.match(renderer, /function showFileExtension\(\)/);
-  assert.match(renderer, /visibleFileExtension = extension/);
-  assert.match(renderer, /extensionTimer = setTimeout\(hideFileExtension, 2000\)/);
-  assert.match(renderer, /if \(extension && hasPicture\) drawFileExtensionOverlay\(extension, width, height\)/);
-  assert.match(renderer, /extension !== lastRenderedExtension/);
-  assert.match(renderer, /video\.addEventListener\('play', \(\) => \{[\s\S]*?showFileExtension\(\);[\s\S]*?showPlaybackCursor\(\);/);
+  assert.doesNotMatch(renderer, /visibleFileExtension|showFileExtension|drawFileExtensionOverlay|fileExtensionForTrack/);
+  assert.match(renderer, /if \(paused\) drawOsdPause\(osdContext, safe\)/, 'PAUSE is drawn on the shared OSD layer');
   assert.doesNotMatch(renderer, /currentTrackStarted/);
-
-  const helper = renderer.match(/function fileExtensionForTrack\(track\) \{[\s\S]*?\n\}/)?.[0];
-  assert.ok(helper, 'track extension resolver exists');
-  const fileExtensionForTrack = vm.runInNewContext(`(${helper})`);
-  assert.equal(fileExtensionForTrack({ path: String.raw`C:\\Videos\\final.cut.MKV` }), 'MKV');
-  assert.equal(fileExtensionForTrack({ path: '/library/no-extension', title: 'feature.Mp4' }), 'MP4');
-  assert.equal(fileExtensionForTrack({ path: '/library/clip.webm?session=1' }), 'WEBM');
-  assert.equal(fileExtensionForTrack({ path: '/library/no-extension', title: 'Untitled video' }), '');
 });
 
 test('landing screen, static input, and sound effects are CRT-ready and preloaded', () => {
@@ -199,10 +191,11 @@ test('shelf modal keeps additive multi-tape selection and queues all selected fi
 test('startup preserves the selected input without autoplaying ordinary playlists', () => {
   const loader = renderer.match(/async function loadPlaylists\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
   assert.doesNotMatch(loader, /restorePlaybackSession|playTrack\(/);
-  assert.match(renderer, /let selectedInput = 'video';[\s\S]*?resumeVideoAfterStatic = false;\s*resumeTVAfterStatic = false;\s*if \(selectedInput === 'tv'\) \{\s*syncBypassControls\(\);\s*renderPlaylist\(\);\s*\} else \{\s*setInputSource\(selectedInput, false\);\s*\}\s*startStartupSequence\(\);/);
+  assert.match(renderer, /let selectedInput = 'video';[\s\S]*?resumeVideoAfterStatic = false;\s*resumeTVAfterStatic = false;\s*if \(selectedInput === 'tv'\) \{\s*syncBypassControls\(\);\s*renderPlaylist\(\);\s*\} else \{\s*setInputSource\(selectedInput, false\);\s*\}/);
+  assert.match(renderer, /scheduleFrameLoop\(\);\s*function finishRendererStartup\(\) \{\s*try \{\s*startStartupSequence\(\);/);
   const channelLoader = renderer.match(/async function loadChannels\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
-  assert.match(channelLoader, /for \(const channel of startupOrder\) await scanChannel\(channel\)/);
-  assert.match(channelLoader, /channelsStartupReady = channels\.every\(channel => channel\.scanComplete\)/);
+  assert.match(channelLoader, /for \(const channel of startupOrder\) \{[\s\S]*?await scanChannel\(channel\);/);
+  assert.match(channelLoader, /channelsStartupReady = true;[\s\S]*?void warmChannelsInBackground\(\);/);
   assert.doesNotMatch(channelLoader, /if \(selectedInput !== 'tv'\) return;/);
   assert.match(renderer, /let startupIntroActive = true/);
   assert.match(renderer, /else if \(selectedInput !== 'tv' \|\| startupIntroActive\) \{\s*drawIntroPicture/);
@@ -234,22 +227,14 @@ test('playlist eject preserves originals and defers deleting shared local copies
   assert.match(shelfStorage, /fileStat\.isSymbolicLink\(\) \|\| !fileStat\.isFile\(\)/);
 });
 
-test('pause and extension overlays share CRT typography and mirrored safe areas', () => {
+test('the pause overlay keeps CRT typography and safe areas', () => {
   assert.match(renderer, /const compositeCanvas = document\.createElement\('canvas'\)/);
   assert.match(renderer, /compositeContext\.drawImage\(source, x, y, viewWidth, viewHeight\)/);
-  assert.match(renderer, /function drawCornerOverlayText\(text, side, width, height\)/);
-  assert.match(renderer, /compositeContext\.font = `700 \$\{fontSize\}px ui-monospace, SFMono-Regular, Menlo, monospace`/);
-  assert.match(renderer, /compositeContext\.shadowColor = '#e9f4d8cc'/);
-  assert.match(renderer, /compositeContext\.fillStyle = '#f3f5e8'/);
-  assert.match(renderer, /const inset = Math\.round\(width \* 0\.10\)/);
-  assert.match(renderer, /const textTop = Math\.round\(height \* 0\.15\)/);
-  assert.match(renderer, /const textX = side === 'right' \? width - inset - measured\.width : inset/);
-  assert.match(renderer, /const baselineY = textTop \+ measured\.actualBoundingBoxAscent/);
-  assert.match(renderer, /drawCornerOverlayText\('PAUSE', 'left', width, height\)/);
-  assert.match(renderer, /drawCornerOverlayText\(extension, 'right', width, height\)/);
-  assert.match(renderer, /const barsHeight = Math\.max\(1, Math\.ceil\(measured\.actualBoundingBoxAscent \+ measured\.actualBoundingBoxDescent\)\)/);
-  assert.match(renderer, /compositeContext\.fillRect\(barsX, barsY, barWidth, barsHeight\)/);
-  assert.match(renderer, /compositeContext\.fillRect\(barsX \+ barWidth \+ Math\.max\(2, Math\.round\(barWidth \* 0\.7\)\), barsY, barWidth, barsHeight\)/);
+  assert.match(renderer, /const OSD_CANVAS_FONT = '"Saturday OSD", ui-monospace/);
+  assert.match(renderer, /document\.fonts\?\.load\?\.\(`48px \$\{OSD_CANVAS_FONT\}`\)/);
+  assert.match(renderer, /const OSD_INK = '#e6fbff';/);
+  assert.match(renderer, /const OSD_GLOW = '#33d6ff';/);
+  assert.match(renderer, /drawOsdText\(context, 'PAUSE', x, y, size\)/);
   assert.match(renderer, /gl\.texSubImage2D\(gl\.TEXTURE_2D, 0, 0, 0, gl\.RGBA, gl\.UNSIGNED_BYTE, compositeCanvas\)/);
   assert.match(renderer, /paused !== lastCompositePaused/);
   assert.match(css, /\.empty-title \{[^}]*font-family: ui-monospace/);
@@ -288,11 +273,11 @@ test('the final playable queued tape shuts off the retained CRT picture', () => 
 
 test('tape-library browsing pauses CRT redraws and resumes when closed', () => {
   assert.match(renderer, /let frameLoopRequest = null/);
-  assert.match(renderer, /function scheduleFrameLoop\(\) \{\s*if \(frameLoopRequest === null\) frameLoopRequest = requestAnimationFrame\(frameLoop\);\s*\}/);
+  assert.match(renderer, /function scheduleFrameLoop\(\) \{\s*if \(pictureVisible && frameLoopRequest === null\) frameLoopRequest = requestAnimationFrame\(frameLoop\);\s*\}/);
   assert.match(renderer, /function pauseFrameLoop\(\) \{\s*if \(frameLoopRequest === null\) return;\s*cancelAnimationFrame\(frameLoopRequest\);\s*frameLoopRequest = null;\s*\}/);
-  assert.match(renderer, /async function openLibrary\(\) \{\s*if \(!libraryDialog\.open\) \{\s*libraryDialog\.showModal\(\);\s*pauseFrameLoop\(\);/);
-  assert.match(renderer, /function frameLoop\(now\) \{\s*frameLoopRequest = null;\s*if \(libraryDialog\.open\) return;\s*scheduleFrameLoop\(\);/);
-  assert.match(renderer, /libraryDialog\.addEventListener\('close', \(\) => \{\s*scheduleFrameLoop\(\);\s*showPlaybackCursor\(\);\s*\}\);/);
+  assert.match(renderer, /async function openLibrary\(\) \{\s*if \(selectedInput === 'tv'\) setInputSource\('video'\);\s*if \(!libraryDialog\.open\) \{\s*libraryDialog\.showModal\(\);\s*pauseFrameLoop\(\);/);
+  assert.match(renderer, /function frameLoop\(now\) \{\s*frameLoopRequest = null;\s*if \(!pictureVisible \|\| libraryDialog\.open\) return;\s*scheduleFrameLoop\(\);/);
+  assert.match(renderer, /libraryDialog\.addEventListener\('close', \(\) => \{\s*scheduleFrameLoop\(\);\s*\}\);/, 'closing shelves remotely must not reveal the mouse cursor');
 });
 
 test('the CRT stage fills the bezel interior without a secondary 4:3 inset', () => {
@@ -303,13 +288,15 @@ test('the CRT stage fills the bezel interior without a secondary 4:3 inset', () 
   assert.doesNotMatch(html, /class="cabinet-foot"|class="vhs-deck"/);
 });
 
-test('all user-adjustable dials span 0–100 and TV bypasses stay independent', () => {
-  for (const dial of ['volume', 'scanlines', 'curve', 'edgeBlur', 'hue', 'vhsScan', 'glitch', 'brokenTape', 'glow', 'glare', 'fxAmount']) {
+test('dials span 0–100 (scanlines, edge blur, glow reach 200) and TV bypasses stay independent', () => {
+  const boosted = ['scanlines', 'edgeBlur', 'glow'];
+  for (const dial of ['volume', 'scanlines', 'curve', 'edgeBlur', 'hue', 'vhsScan', 'glitch', 'brokenTape', 'glow', 'brightness', 'fxAmount']) {
     const tag = html.match(new RegExp(`<button id="${dial}"[^>]+>`))?.[0];
     assert.ok(tag, `${dial} control exists`);
     assert.match(tag, /aria-valuemin="0"/);
-    assert.match(tag, /aria-valuemax="100"/);
+    assert.match(tag, boosted.includes(dial) ? /aria-valuemax="200"/ : /aria-valuemax="100"/);
   }
+  assert.match(renderer, /col\*=1\.0-scan\*0\.2\*lineWave;/);
   for (const id of ['pictureBypassToggle', 'audioBypassToggle']) assert.match(html, new RegExp(`id="${id}"`));
   for (const removed of ['videoBypassToggle', 'crtToggle', 'filterToggle']) assert.doesNotMatch(html, new RegExp(`id="${removed}"`));
   assert.match(renderer, /pictureFiltersEnabled = !pictureFiltersEnabled/);
@@ -350,13 +337,12 @@ test('metadata lookup routes by media type and avoids persistent false misses', 
   assert.match(metadata, /summary\.originalimage\?\.source/);
 });
 
-test('maximum tape faults remain deliberately gentle and Glare has no fixed stripe', () => {
+test('maximum tape faults remain deliberately gentle with no fixed glare stripe', () => {
   assert.match(renderer, /0\.006\*glitch/);
   assert.match(renderer, /glitch\*0\.012/);
   assert.match(renderer, /broken\*0\.14/);
   assert.match(renderer, /broken\*0\.012/);
   assert.doesNotMatch(css, /linear-gradient\(110deg, #fff0 34%, #eaffd010 47%, #fff0 58%\)/);
-  assert.match(renderer, /uniform float glare/);
 });
 
 test('playlist eject keeps original source files untouched', () => {
@@ -383,8 +369,8 @@ test('library artwork is portrait, fully visible, and backed by a rotated VHS ca
   assert.match(css, /\.library-cassette b span \{ display: block; transform: rotate\(180deg\); \}/);
   assert.match(renderer, /className = 'library-tape-play'/);
   assert.match(renderer, /className = 'library-tape-info'/);
-  assert.match(renderer, /captionTitle\.textContent = title/);
-  assert.match(renderer, /captionDetail\.textContent = subtitle/);
+  assert.match(renderer, /captionTitle\.textContent = view\.collection\?\.name \|\| title/);
+  assert.match(renderer, /captionDetail\.textContent = view\.collection \? [^\n]* : subtitle/);
   assert.doesNotMatch(renderer, /library-artwork-label/);
   assert.match(renderer, /FIND EXACT/);
   assert.match(renderer, /SAVE LABEL/);
@@ -413,9 +399,40 @@ test('shelf ledges scroll with compact tapes at desktop and phone widths', () =>
   assert.match(css, /\.library-tape, \.library-folder-card \{ position: relative; z-index: 0; align-self: end/);
   assert.match(css, /\.library-tape::after, \.library-folder-card::after \{[^}]*bottom: -10px/);
   assert.match(css, /\.library-artwork-label \{ display:none; \}/);
-  assert.match(renderer, /captionDetail\.textContent = subtitle/);
+  assert.match(renderer, /captionDetail\.textContent = view\.collection \? [^\n]* : subtitle/);
   assert.match(css, /\.library-artwork-frame \{ width:min\(100%,104px\); aspect-ratio:2 \/ 3; \}/);
   assert.match(css, /@media \(max-width:760px\) \{ \.library-artwork-frame \{ width:min\(100%,100px\); \}/);
   assert.match(css, /@media \(max-width: 420px\)[\s\S]*?\.library-shelf-row \{ grid-template-columns: repeat\(auto-fill,minmax\(102px,1fr\)/);
   assert.match(css, /\.library-import-progress-items|\.library-import-items/);
+});
+
+test('every on-screen display is anchored to the tube and blended through the CRT shader without VHS tracking', () => {
+  for (const name of ['drawOsdPause', 'drawOsdChannel', 'drawOsdVolume', 'drawOsdMute', 'drawOsdSearching', 'drawOsdCaption']) {
+    assert.match(renderer, new RegExp(`function ${name}\\(context, safe`), `${name} draws on the OSD layer`);
+  }
+  assert.doesNotMatch(renderer, /osdPictureRect/, 'video framing must not move or resize the OSD');
+  assert.match(renderer, /uniform sampler2D osd; uniform float osdOn;/);
+  assert.match(renderer, /vec2 screenT=t;float row=/, 'the OSD samples the curved position before VHS jitter');
+  assert.match(renderer, /o=osdSample\(screenT,blurRadius\)/, 'the OSD shares the edge blur');
+  assert.match(renderer, /col=col\*\(1\.0-o\.a\)\+vec3\(oR\.r,o\.g,oB\.b\);[\s\S]*col=hueTurn/, 'hue, picture mode, scanlines and glow follow the OSD blend');
+  assert.match(renderer, /col\*=1\.0-dropout\*\(1\.0-osdAlpha\)/, 'tape dropout and snow stay under the OSD');
+  assert.match(renderer, /gl\.pixelStorei\(gl\.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true\)/);
+  assert.match(css, /#stage \.channel-surf-overlay,#stage \.volume-overlay,#stage \.mute-overlay,#stage \.searching-indicator,#stage \.caption \{ opacity:0 !important;/);
+});
+
+test('OSD position and font scale depend only on screen dimensions, not programme aspect ratio', () => {
+  const source = renderer.match(/function osdSafeRect\(width, height\) \{[\s\S]*?\n\}/)?.[0];
+  assert.ok(source);
+  const context = vm.createContext({});
+  vm.runInContext(source, context);
+  for (const [width, height] of [[1280, 960], [1920, 1080], [800, 600]]) {
+    const expected = { x: width * 0.12, y: height * 0.12, width: width * 0.76, height: height * 0.76, unit: height };
+    for (const aspect of [4 / 3, 16 / 9, 2.35, 9 / 16]) {
+      context.osdPictureRect = { x: 90, y: 120, width: height * aspect, height: height / aspect };
+      context.width = width;
+      context.height = height;
+      const actual = vm.runInContext('osdSafeRect(width, height)', context);
+      assert.deepEqual({ ...actual }, expected);
+    }
+  }
 });

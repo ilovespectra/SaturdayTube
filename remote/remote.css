@@ -1,0 +1,386 @@
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html { --dark: 0; background: #000; min-height:100%; touch-action:none; }
+#trackpadStatus { position:fixed; bottom:10px; left:10px; color:#ffb39e; pointer-events:none; z-index:50; }
+html, body { margin: 0; min-height: 100%; color: #2a2a2c; }
+/* The room backdrop fades to black as the ambient light drops (--dark: 0 bright → 1 pitch dark). */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(circle at 50% 0%, #3a3632, #141312 70%);
+  opacity: calc(1 - var(--dark)); transition: opacity 1.5s ease;
+}
+body {
+  font: 600 12px/1.1 "Helvetica Neue", Arial, sans-serif;
+  display: flex; justify-content: center;
+  padding: max(14px, env(safe-area-inset-top)) 10px max(18px, env(safe-area-inset-bottom));
+  -webkit-user-select: none; user-select: none; touch-action: manipulation; overscroll-behavior: none;
+}
+button { font: inherit; color: inherit; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
+button:focus-visible { outline: 2px solid #ffcf4a; outline-offset: 2px; }
+.remote-workspace { position:relative; flex:0 0 auto; align-self:flex-start; }
+
+.remote {
+  /* Drawn at 340px and scaled whole to the phone's width (see remote.js), so the shape never changes. */
+  flex: 0 0 auto; width: 340px; zoom: var(--remote-scale, 1);
+  padding: 26px 22px 24px;
+  border-radius: 120px 120px 64px 64px / 90px 90px 50px 50px;
+  background:
+    radial-gradient(ellipse at 30% 8%, rgba(255,255,255,.75), transparent 45%),
+    linear-gradient(90deg, #9ea1a6 0%, #d9dbde 9%, #eceef0 30%, #f3f4f5 50%, #e3e5e8 72%, #c4c7cb 90%, #8f9297 100%);
+  box-shadow: inset 0 2px 1px rgba(255,255,255,.9), inset 0 -3px 6px rgba(0,0,0,.25), 0 18px 40px rgba(0,0,0,.6), 0 2px 0 #77797d;
+  display: grid; gap: 14px;
+  position: relative; isolation: isolate;
+  --key-bright: calc(1 - var(--dark) * .62);
+}
+/* Shade over the plastic and its printed labels; keys and the LCD sit above it, so in a dark room
+   little but the keys is left visible. */
+.remote::before {
+  content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none;
+  background: #030403; opacity: var(--dark); transition: opacity 1.5s ease;
+}
+:where(.remote button) { position: relative; }
+.remote button, .rocker, .lcd { z-index: 2; }
+.rocker { position: relative; }
+.remote .rocker button { filter: none; }
+.remote .rocker button.pressed { filter: brightness(.82); }
+.remote button, .rocker {
+  filter: brightness(var(--key-bright));
+  transition: filter .9s ease-out, color .9s ease-out, text-shadow .9s ease-out;
+}
+
+/* top input cluster */
+.top-cluster { display: grid; justify-items: center; gap: 6px; padding-top: 2px; }
+.oval-row { display: flex; justify-content: center; gap: 16px; }
+.oval-key { display: grid; justify-items: center; gap: 3px; font-size: 9px; letter-spacing: .04em; color: #4c4d50; }
+.oval-key.raised { position: relative; top: -12px; }
+.oval-key button {
+  width: 34px; height: 44px; border-radius: 50%;
+  background: linear-gradient(160deg, #c5ced8, #8c99a6);
+  box-shadow: inset 0 2px 2px rgba(255,255,255,.7), inset 0 -3px 4px rgba(0,0,0,.25), 0 2px 3px rgba(0,0,0,.35);
+  transform: rotate(-12deg);
+}
+.oval-key:nth-child(n+3) button { transform: rotate(12deg); }
+.oval-key:last-child button { background: linear-gradient(160deg, #5c5f63, #2c2e31); }
+
+.pill { min-width: 70px; height: 32px; padding: 0 14px; border-radius: 18px; font-size: 12px; letter-spacing: .02em; box-shadow: inset 0 2px 2px rgba(255,255,255,.45), inset 0 -3px 4px rgba(0,0,0,.3), 0 2px 3px rgba(0,0,0,.35); }
+.input-row { position: relative; display: flex; justify-content: center; width: 100%; }
+.key.power-key { position: absolute; right: calc(50% + 50px); top: 1px; display: grid; place-items: center; background: linear-gradient(180deg, #ef4b3d, #b5180f); }
+.power-key svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
+.fs-key { position: absolute; left: calc(50% + 50px); top: 1px; display: grid; place-content: center; justify-items: center; gap: 1px; }
+.fs-key svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.fs-key span { font-size: 6px; line-height: 1; letter-spacing: .03em; }
+.fs-key[data-mode]:not([data-mode="off"]) { color: #8dff9c; }
+.pill.red { color: #fff; background: linear-gradient(180deg, #ef4b3d, #b5180f); text-shadow: 0 1px 0 rgba(0,0,0,.35); }
+.pill.white { color: #222; background: linear-gradient(180deg, #ffffff, #d6d7d9); min-width: 64px; height: 30px; }
+
+/* transport panel and LCD */
+.inset {
+  border-radius: 18px; padding: 12px;
+  background: linear-gradient(180deg, #d4d7db, #e6e8eb);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.25), inset 0 -1px 0 rgba(255,255,255,.8);
+}
+.transport { display: grid; gap: 10px; }
+.lcd {
+  position: relative; display: grid; gap: 3px; justify-self: center; width: 78%; min-height: 44px;
+  padding: 6px 10px 6px 18px; border-radius: 7px;
+  background: linear-gradient(180deg, #0b0b0c, #1b1b1e); border: 2px solid #3d3e42;
+  box-shadow: inset 0 0 10px rgba(0,0,0,.9), 0 1px 0 rgba(255,255,255,.7);
+  font: 700 15px/1.05 "Courier New", ui-monospace, monospace; color: #ff5a3c; text-shadow: 0 0 6px rgba(255,80,40,.7);
+  overflow: hidden; white-space: nowrap;
+}
+.lcd-main { overflow: hidden; text-overflow: ellipsis; }
+.lcd-sub { font-size: 10px; color: #ffb39e; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 0 4px rgba(255,120,80,.6); }
+.led { position: absolute; left: 7px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: #4b1d16; }
+.led.on { background: #6cff6c; box-shadow: 0 0 6px #6cff6c; }
+.led.blink { background: #ffcf4a; box-shadow: 0 0 6px #ffcf4a; }
+
+.key-row { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 10px; align-items: center; }
+.key-row.room-row { grid-template-columns: repeat(3, 1fr); justify-items: center; }
+.room-key { display: grid; place-items: center; }
+.room-key svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.key {
+  height: 32px; border-radius: 9px; font-size: 13px; color: #fff;
+  background: linear-gradient(180deg, #8a8d92, #55585d);
+  box-shadow: inset 0 2px 2px rgba(255,255,255,.4), inset 0 -3px 4px rgba(0,0,0,.35), 0 2px 3px rgba(0,0,0,.4);
+}
+.key.dark { background: linear-gradient(180deg, #6f7378, #3c3f43); }
+.key-row .key:not(.round) { border-radius: 16px; height: 34px; }
+.key.round { width: 44px; height: 30px; border-radius: 50%; }
+.key.small-text { font-size: 10px; }
+.mini { display: grid; justify-items: center; gap: 3px; font-size: 9px; color: #3f4043; text-transform: uppercase; }
+
+.color-row { display: flex; justify-content: center; gap: 28px; }
+/* Effect toggles: the LED is lit while the TV's video or audio effects are on (not bypassed). */
+.fx-row { display: flex; justify-content: center; gap: 18px; }
+.key.fx-key { display: inline-flex; align-items: center; gap: 7px; min-width: 104px; height: 30px; padding: 0 14px; border-radius: 16px; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.fx-led { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #2d3a30; box-shadow: inset 0 1px 1px rgba(0,0,0,.6); transition: background .2s ease, box-shadow .2s ease; }
+.fx-key[aria-pressed="true"] .fx-led { background: #59ff74; box-shadow: 0 0 5px rgba(89,255,116,.85), inset 0 -1px 1px rgba(0,0,0,.25); }
+/* Picture look: screen type, colour filter, and a swatch key that paints the cabinet a random colour. */
+.look-row { display: flex; justify-content: center; align-items: end; gap: 16px; }
+.key.look-key { min-width: 78px; height: 28px; padding: 0 10px; border-radius: 14px; font-size: 10px; font-weight: 700; letter-spacing: .08em; }
+.key.skin-key { display: grid; place-items: center; }
+.skin-swatch { width: 16px; height: 16px; border-radius: 50%; background: var(--skin, #8a6a4a); box-shadow: 0 0 0 2px rgba(255,255,255,.55), inset 0 -2px 3px rgba(0,0,0,.35); }
+.key.dot { width: 30px; height: 30px; border-radius: 50%; font-weight: 800; font-size: 12px; }
+.key.dot.yellow { color: #222; background: radial-gradient(circle at 40% 35%, #ffe679, #b99a10); }
+.key.dot.blue { background: radial-gradient(circle at 40% 35%, #5aa7ff, #1648a8); }
+.key.dot.red { background: radial-gradient(circle at 40% 35%, #ff6b5d, #b0170e); }
+
+/* d-pad */
+.nav-cluster {
+  position: relative; height: 230px; margin: 0 -8px;
+  border-radius: 46% 46% 50% 50%;
+  background: radial-gradient(ellipse at 50% 45%, #f4f5f6 0%, #dfe1e4 60%, #c9ccd0 100%);
+  box-shadow: inset 0 3px 5px rgba(0,0,0,.18), inset 0 -2px 2px rgba(255,255,255,.8);
+}
+.dpad {
+  position: absolute; left: 50%; top: 14px; width: 180px; height: 180px; transform: translateX(-50%); z-index: 2;
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,.35)); transition: filter .9s ease-out;
+}
+/* Where neighbouring arrows meet, each is clipped along a 45° flat so a small gap separates them. */
+.arrow {
+  position: absolute; color: #111; font-size: 18px;
+  background: linear-gradient(180deg, #ffffff, #d8d9db);
+  box-shadow: inset 0 2px 2px rgba(255,255,255,.9), inset 0 -3px 4px rgba(0,0,0,.2);
+}
+.arrow.up, .arrow.down { left: 30px; width: 120px; height: 46px; }
+.arrow.up { top: 0; border-radius: 60px 60px 6px 6px / 46px 46px 6px 6px; clip-path: polygon(0 0, 120px 0, 120px 27px, 101px 46px, 19px 46px, 0 27px); }
+.arrow.down { bottom: 0; border-radius: 6px 6px 60px 60px / 6px 6px 46px 46px; clip-path: polygon(19px 0, 101px 0, 120px 19px, 120px 46px, 0 46px, 0 19px); }
+.arrow.left, .arrow.right { top: 30px; width: 46px; height: 120px; }
+.arrow.left { left: 0; border-radius: 46px 6px 6px 46px / 60px 6px 6px 60px; clip-path: polygon(0 0, 27px 0, 46px 19px, 46px 101px, 27px 120px, 0 120px); }
+.arrow.right { right: 0; border-radius: 6px 46px 46px 6px / 6px 60px 60px 6px; clip-path: polygon(19px 0, 46px 0, 46px 120px, 19px 120px, 0 101px, 0 19px); }
+.ok {
+  position: absolute; left: 50%; top: 50%; width: 76px; height: 48px; transform: translate(-50%, -50%);
+  display: grid; place-content: center; border-radius: 50%; color: #fff;
+  background: radial-gradient(circle at 45% 30%, #ff6d5c, #b4160c);
+  box-shadow: inset 0 2px 2px rgba(255,255,255,.4), inset 0 -3px 4px rgba(0,0,0,.35), 0 0 0 3px #b8bbbf, 0 3px 4px rgba(0,0,0,.4);
+}
+.ok b { font-size: 13px; }
+.ok small { font-size: 9px; font-weight: 600; border-top: 1px solid rgba(255,255,255,.6); padding-top: 1px; }
+.pill.corner { position: absolute; bottom: 4px; min-width: 64px; height: 30px; font-weight: 700; }
+.pill.corner.guide { left: 6px; transform: rotate(20deg); }
+.pill.corner.menu { right: 6px; transform: rotate(-20deg); }
+
+.page-key { position: absolute; top: 10px; z-index: 2; display: grid; justify-items: center; gap: 3px; font-size: 9px; letter-spacing: .04em; color: #3f4043; }
+.page-key.prev { left: 10px; transform: rotate(-14deg); }
+.page-key.next { right: 10px; transform: rotate(14deg); }
+.page-key .key.round { width: 42px; height: 30px; font-size: 12px; }
+
+.exit-row { display: flex; justify-content: space-between; padding: 0 4px; }
+
+.rocker-row { display: grid; grid-template-columns: 62px 1fr 62px; align-items: center; justify-items: center; }
+.rocker {
+  display: grid; grid-template-rows: 48px 18px 48px; width: 58px; border-radius: 30px; overflow: hidden;
+  background: linear-gradient(90deg, #d2d4d7, #ffffff 40%, #dcdde0);
+  box-shadow: inset 0 2px 2px #fff, inset 0 -3px 5px rgba(0,0,0,.2), 0 0 0 4px #b9bcc0, 0 3px 6px rgba(0,0,0,.4);
+}
+.rocker button { font-size: 18px; color: #222; background: transparent; }
+.rocker b { display: grid; place-items: center; font-size: 12px; letter-spacing: .04em; }
+
+.numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; justify-items: center; align-items: end; }
+.key.num { width: 56px; height: 32px; border-radius: 50%; font-size: 17px; font-weight: 700; color: #fff; background: linear-gradient(180deg, #8f969e, #5b636b); }
+
+.brand { text-align: center; font: 700 22px/1 "Helvetica Neue", Arial, sans-serif; letter-spacing: -.02em; color: #2c2d30; padding-top: 4px; }
+.brand .swoosh { color: #d2271b; font-weight: 300; margin-right: 1px; }
+.brand small { font-size: 9px; vertical-align: top; }
+
+button.pressed { filter: brightness(calc(var(--key-bright) * .82)); transform-origin: center; translate: 0 1px; transition: none; }
+.oval-key button.pressed { filter: brightness(calc(var(--key-bright) * .75)); }
+
+/* Backlight: any press lights every key for three seconds (remote.js toggles body.lit). It always
+   comes on; --glow scales it, so it's a faint tint in a bright room and a full glow in the dark. */
+html { --glow: calc(.3 + var(--dark) * .7); }
+body.lit .remote { --key-bright: 1.04; }
+body.lit .remote button, body.lit .rocker {
+  color: color-mix(in srgb, #d9ffe1 calc(var(--glow) * 100%), #fff);
+  text-shadow: 0 0 1px rgba(128,255,174,.75), 0 0 6px rgba(80,255,140,.32), 0 0 12px rgba(80,255,140,.18);
+  filter: brightness(var(--key-bright)) drop-shadow(0 0 3px rgba(109,255,154,calc(var(--glow) * .5)));
+}
+body.lit .rocker button { filter: none; }
+body.lit .remote .oval-key span,
+body.lit .remote .mini span,
+body.lit .remote .page-key span,
+body.lit .remote .brand,
+body.lit .remote .pill.red,
+body.lit .remote .pill.white,
+body.lit .remote .key:not(.dot) {
+  text-shadow: 0 0 2px rgba(163,255,194,.25), 0 0 10px rgba(80,255,140,.12);
+}
+/* White plastic keys glow pale green with dark legends, like luminous rubber. */
+body.lit .remote button.arrow, body.lit .remote button.pill.white, body.lit .rocker {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, #f4fff7 calc(var(--glow) * 100%), #fff),
+    color-mix(in srgb, #b8f3ca calc(var(--glow) * 100%), #d8d9db));
+  color: color-mix(in srgb, #0c4a22 calc(var(--glow) * 100%), #1a1a1a); text-shadow: 0 0 2px rgba(255,255,255,.6);
+}
+body.lit .rocker button { color: color-mix(in srgb, #0c4a22 calc(var(--glow) * 100%), #222); text-shadow: none; }
+body.lit .remote button.pressed { filter: brightness(.86) drop-shadow(0 0 7px rgba(109,255,154,calc(var(--glow) * .95))); }
+body.lit .dpad { filter: drop-shadow(0 2px 2px rgba(0,0,0,calc(.35 - var(--glow) * .3))) drop-shadow(0 0 4px rgba(109,255,154,calc(var(--glow) * .85))) drop-shadow(0 0 10px rgba(80,255,140,calc(var(--glow) * .45))); }
+body.lit .ok small { border-top-color: rgba(200,255,215,.8); }
+body.lit .fs-key svg { stroke: color-mix(in srgb, #b8ffcc calc(var(--glow) * 100%), #c9ccd0); opacity: 1; }
+html.dim .lcd { filter: brightness(calc(1 - var(--dark) * .35)); }
+.brand { position: relative; z-index: 0; cursor: pointer; }
+.remote-foot { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.remote-foot .brand { grid-column: 2; }
+.flip-key.key.round { grid-column: 1; justify-self: center; width: 36px; height: 26px; display: grid; place-items: center; }
+.flip-key svg, .back-flip svg { width: 15px; height: 15px; fill: none; stroke: #e4e6e9; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+body.lit .flip-key svg { stroke: color-mix(in srgb, #b8ffcc calc(var(--glow) * 100%), #e4e6e9); }
+
+/* Back of the remote: a dark service panel with analog knobs, slide switches and stepped selectors.
+   Its legends are printed in phosphor green so they read in a dark room. */
+.remote-back { display: none; }
+.remote-workspace.flipped .remote { display: none; }
+.remote-workspace.flipped .remote-back {
+  display: grid; gap: 12px; width: 340px; zoom: var(--remote-scale, 1);
+  padding: 30px 20px 22px; color: #9fe7b0;
+  border-radius: 120px 120px 64px 64px / 90px 90px 50px 50px;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 1px, transparent 1px 4px),
+    radial-gradient(ellipse at 50% 0%, #34383d, #1b1d20 70%);
+  box-shadow: inset 0 2px 1px rgba(255,255,255,.18), inset 0 -3px 6px rgba(0,0,0,.6), 0 18px 40px rgba(0,0,0,.6), 0 2px 0 #111;
+}
+.back-heading { display: grid; justify-items: center; gap: 4px; letter-spacing: .2em; }
+.back-heading b { font-size: 11px; color: #c9f5d3; text-shadow: 0 0 6px rgba(89,255,116,.35); }
+.back-heading small { font-size: 8px; color: #6f9d7b; }
+.back-groups { display: grid; gap: 10px; }
+.back-group { border: 1px solid rgba(159,231,176,.18); border-radius: 12px; padding: 14px 8px 10px; position: relative; background: rgba(0,0,0,.18); }
+.back-group h3 { position: absolute; top: -6px; left: 14px; margin: 0; padding: 0 6px; font-size: 8px; letter-spacing: .22em; color: #9fe7b0; background: #23262a; }
+.back-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 4px; justify-items: center; align-items: start; }
+.back-grid span { font-size: 7.5px; letter-spacing: .08em; text-align: center; color: #8fcf9e; text-transform: uppercase; }
+.back-grid .disabled { opacity: .35; }
+.knob-control, .switch-control { display: grid; justify-items: center; gap: 3px; }
+.knob {
+  --angle: -135deg; --fill: 0;
+  width: 42px; height: 42px; border-radius: 50%; touch-action: none;
+  background: conic-gradient(from -135deg, rgba(89,255,116,.75) calc(var(--fill) * 2.7deg), rgba(255,255,255,.08) 0 270deg, transparent 0);
+  display: grid; place-items: center;
+}
+.knob-cap {
+  width: 34px; height: 34px; border-radius: 50%; position: relative; transform: rotate(var(--angle));
+  background: radial-gradient(circle at 40% 30%, #6c7076, #2a2c30 70%);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.3), 0 2px 4px rgba(0,0,0,.7);
+}
+.knob-cap::after { content: ""; position: absolute; left: 50%; top: 3px; width: 2px; height: 10px; margin-left: -1px; border-radius: 1px; background: #c9f5d3; box-shadow: 0 0 4px rgba(89,255,116,.8); }
+.knob-control output { font-size: 9px; font-variant-numeric: tabular-nums; color: #c9f5d3; min-height: 10px; }
+.knob-control.turning .knob { filter: drop-shadow(0 0 6px rgba(89,255,116,.7)); }
+.toggle-switch { width: 22px; height: 40px; border-radius: 6px; background: #0e0f10; box-shadow: inset 0 2px 4px rgba(0,0,0,.8); position: relative; }
+.toggle-switch i { position: absolute; left: 3px; right: 3px; height: 17px; bottom: 3px; border-radius: 4px; background: linear-gradient(180deg, #7b8086, #3c3f43); transition: bottom .15s ease, background .15s ease; }
+.toggle-switch[aria-checked="true"] i { bottom: 20px; background: linear-gradient(180deg, #8dffa3, #2f9a48); box-shadow: 0 0 6px rgba(89,255,116,.6); }
+.selector-control { grid-column: span 2; display: grid; justify-items: center; gap: 4px; width: 100%; }
+.selector-row { display: grid; grid-template-columns: 24px 1fr 24px; gap: 4px; width: 100%; align-items: center; }
+.selector-step { height: 24px; border-radius: 6px; font-size: 9px; color: #c9f5d3; background: linear-gradient(180deg, #4b4f54, #2a2c30); box-shadow: inset 0 1px 1px rgba(255,255,255,.2), 0 1px 2px rgba(0,0,0,.6); }
+.selector-row output { height: 24px; display: grid; place-items: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 4px; border-radius: 4px; font: 700 9px/1 ui-monospace, Menlo, monospace; letter-spacing: .06em; text-transform: uppercase; color: #8dffa3; background: #071008; box-shadow: inset 0 1px 3px rgba(0,0,0,.9); text-shadow: 0 0 5px rgba(89,255,116,.6); cursor: pointer; }
+.back-button { grid-column: span 2; align-self: center; height: 28px; width: 100%; border-radius: 14px; font-size: 9px; font-weight: 700; letter-spacing: .1em; color: #2a1a00; background: radial-gradient(circle at 40% 30%, #ffd77a, #b07a12); box-shadow: inset 0 1px 1px rgba(255,255,255,.5), 0 2px 3px rgba(0,0,0,.6); }
+.back-flip { justify-self: center; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 16px; border-radius: 14px; font-size: 9px; letter-spacing: .14em; color: #e4e6e9; background: linear-gradient(180deg, #5a5e63, #2e3034); box-shadow: inset 0 1px 1px rgba(255,255,255,.25), 0 2px 3px rgba(0,0,0,.6); }
+html.mirror .remote-back { pointer-events: none; }
+.settings-key.key.round { grid-column: 3; justify-self: center; width: 36px; height: 26px; display: grid; place-items: center; }
+.settings-key svg { width: 15px; height: 15px; fill: #e4e6e9; }
+body.lit .settings-key svg { fill: color-mix(in srgb, #b8ffcc calc(var(--glow) * 100%), #e4e6e9); }
+
+/* Remote settings sheet: dark with glowing text so it stays readable in a dark room. */
+.remote-settings {
+  position: fixed; inset: 0; z-index: 40; display: grid; align-items: end; justify-items: center;
+  padding: 16px 12px max(18px, env(safe-area-inset-bottom)); background: rgba(0,0,0,.55);
+}
+.remote-settings[hidden] { display: none; }
+.remote-settings-card {
+  width: min(360px, 100%); padding: 18px 18px 16px; border-radius: 18px;
+  background: #0b0d0b; border: 1px solid #1f4a2a; box-shadow: 0 0 24px rgba(80,255,140,.12), 0 18px 40px rgba(0,0,0,.7);
+  color: #8dff9c; font: 700 13px/1.2 "Helvetica Neue", Arial, sans-serif; letter-spacing: .06em;
+  text-shadow: 0 0 6px rgba(80,255,140,.45);
+}
+.remote-settings h2 { margin: 0 0 14px; font-size: 14px; letter-spacing: .18em; text-align: center; }
+.setting-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 15px; }
+.setting-row output { font: 700 18px/1 "Courier New", ui-monospace, monospace; }
+.remote-settings input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 34px; margin: 8px 0 2px; background: transparent;
+}
+.remote-settings input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px; border-radius: 4px; background: linear-gradient(90deg, #d9dcdf, #3a3d40 55%, #050605); box-shadow: 0 0 0 1px #2f6b3d;
+}
+.remote-settings input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 30px; height: 30px; margin-top: -11px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #c6ffd6, #3bd067); box-shadow: 0 0 10px rgba(89,255,116,.8);
+}
+.remote-settings input[type="range"]::-moz-range-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #d9dcdf, #3a3d40 55%, #050605); }
+.remote-settings input[type="range"]::-moz-range-thumb { width: 30px; height: 30px; border: 0; border-radius: 50%; background: #59ff74; }
+.remote-settings #sizeSlider::-webkit-slider-runnable-track { background: linear-gradient(90deg, #1a3a22, #3bd067); }
+.remote-settings #sizeSlider::-moz-range-track { background: linear-gradient(90deg, #1a3a22, #3bd067); }
+.setting-scale { display: flex; justify-content: space-between; font-size: 10px; color: #4f9a60; text-shadow: none; }
+.setting-toggle { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 12px; }
+.setting-toggle input { width: 22px; height: 22px; accent-color: #3bd067; }
+.remote-settings p { margin: 12px 0 14px; font-weight: 500; font-size: 12px; line-height: 1.4; letter-spacing: .02em; color: #5fae70; text-shadow: none; }
+.remote-settings-done {
+  display: block; width: 100%; height: 42px; border-radius: 21px; font-size: 14px; letter-spacing: .14em;
+  color: #062b12; background: linear-gradient(180deg, #b6ffc7, #3bd067); box-shadow: 0 0 12px rgba(89,255,116,.5);
+}
+
+/* Idle sleep: the remote goes black; the first tap only wakes it. */
+.sleep-veil {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: end center;
+  padding-bottom: max(28px, env(safe-area-inset-bottom)); background: #000;
+  opacity: 0; pointer-events: none; transition: opacity 1.2s ease;
+}
+.sleep-veil span { font: 700 11px/1 "Helvetica Neue", Arial, sans-serif; letter-spacing: .3em; color: #16241a; }
+body.asleep .sleep-veil { opacity: 1; pointer-events: auto; }
+/* Screen mirror (/remote/mirror): a read-only copy of the phone remote. */
+.mirror-badge { display: none; }
+html.mirror .mirror-badge {
+  display: block; position: fixed; top: 10px; right: 12px; z-index: 60; pointer-events: none;
+  font: 700 10px/1 "Helvetica Neue", Arial, sans-serif; letter-spacing: .18em; color: #8a8f94;
+}
+html.mirror .mirror-badge.live { color: #59ff74; }
+html.mirror .mirror-badge.live::before { content: "● "; }
+html.mirror .remote-workspace, html.mirror .remote-settings, html.mirror .sleep-veil, html.mirror .pair-again { pointer-events: none; }
+html.mirror button { cursor: default; }
+.keep-awake { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: .01; pointer-events: none; }
+
+.pair-again {
+  position: fixed; inset: auto 16px max(16px, env(safe-area-inset-bottom)); padding: 14px 16px; border-radius: 12px;
+  background: #111; color: #ffd9cf; border: 1px solid #ff5a3c; box-shadow: 0 10px 30px rgba(0,0,0,.6); text-align: center;
+}
+.pair-again strong { color: #ff5a3c; letter-spacing: .08em; }
+.pair-again p { margin: 6px 0 0; font-weight: 500; line-height: 1.35; }
+
+/* The AUX controller is a compact, vintage six-button pad with touch-safe simultaneous inputs. */
+.remote [hidden] { display: none !important; }
+body.game-active .remote > :not(#genesisGamepad):not(#genesisNoGame) { display: none !important; }
+body.game-active .remote-foot { display: none !important; }
+.genesis-gamepad {
+  width: 296px; margin: 0 auto; padding: 14px 10px 12px; border: 1px solid #0d0f10; border-radius: 34px 34px 46px 46px;
+  color: #e1e3e4; background: radial-gradient(ellipse at 50% 4%, #5b6064, transparent 45%),linear-gradient(135deg,#272b2e,#111416 52%,#323639);
+  box-shadow: inset 0 2px 3px #ffffff3d,inset 0 -5px 9px #000c,0 8px 18px #0009; display: grid; gap: 10px; touch-action: none;
+}
+.gamepad-heading { display: flex; justify-content: space-between; align-items: center; padding: 0 8px; color: #a6f07d; font: 800 10px/1 ui-monospace,monospace; letter-spacing: .15em; text-shadow: 0 0 6px #91e76566; }
+.gamepad-heading output { max-width: 145px; overflow: hidden; color: #bfc3c2; font-size: 8px; letter-spacing: .07em; text-overflow: ellipsis; white-space: nowrap; }
+.gamepad-shoulders { display: grid; grid-template-columns: 42px 42px 1fr 42px 42px; align-items: center; gap: 5px; }
+.gamepad-shoulders button,.stick-click { min-height: 28px; color: #d8dadb; border: 1px solid #060707; border-radius: 7px; background: linear-gradient(#777d80,#363b3d 55%,#24282a); box-shadow: inset 0 1px #ffffff49,inset 0 -2px 4px #000b,0 2px 2px #0008; font: 800 10px ui-monospace,monospace; }
+.gamepad-shoulders span { text-align: center; color: #89908f; font: 700 7px ui-monospace,monospace; letter-spacing: .12em; }
+.gamepad-deck { display: grid; grid-template-columns: 1fr 72px 1fr; align-items: center; gap: 3px; min-height: 174px; padding: 9px 4px; border-radius: 28px; background: radial-gradient(ellipse at 50% 45%,#414649,#252a2c 65%,#181b1d); box-shadow: inset 0 3px 6px #0009,inset 0 -1px #ffffff19; }
+.gamepad-side { display: grid; justify-items: center; gap: 7px; min-width: 0; }
+.game-dpad { width: 90px; height: 90px; display: grid; grid-template: 30px 30px 30px / 30px 30px 30px; place-items: center; filter: drop-shadow(0 2px 2px #000c); }
+.game-dpad button { width: 30px; height: 30px; color: #17191a; background: linear-gradient(#d8dadb,#8f9497); box-shadow: inset 0 1px #fff8,inset 0 -2px 3px #0005; font-size: 11px; }
+.game-dpad button:first-child { grid-area: 1/2; border-radius: 7px 7px 2px 2px; }
+.game-dpad button:nth-child(2) { grid-area: 2/1; border-radius: 7px 2px 2px 7px; }
+.game-dpad span { grid-area: 2/2; display: grid; place-items: center; z-index: 1; width: 28px; height: 28px; border-radius: 6px; color: #717779; background: linear-gradient(#b5b9bb,#6f7578); font-size: 21px; }
+.game-dpad button:nth-child(4) { grid-area: 2/3; border-radius: 2px 7px 7px 2px; }
+.game-dpad button:nth-child(5) { grid-area: 3/2; border-radius: 2px 2px 7px 7px; }
+.analog-stick { position: relative; width: 52px; height: 52px; border-radius: 50%; touch-action: none; background: radial-gradient(circle at 45% 37%,#44494b,#16191a 67%); box-shadow: inset 0 2px 5px #000c,0 2px 2px #ffffff1a; }
+.analog-stick i { position: absolute; top: 50%; left: 50%; width: 28px; height: 28px; margin: -14px; border: 1px solid #111; border-radius: 50%; background: radial-gradient(circle at 40% 30%,#b4babd,#4a5053 75%); box-shadow: inset 0 1px #fff5,0 2px 3px #000b; transform: translate(var(--stick-x,0),var(--stick-y,0)); pointer-events: none; }
+.stick-row { display: grid; grid-template-columns: 52px 32px; align-items: center; gap: 3px; }
+.stick-click { min-height: 25px; width: 32px; border-radius: 50%; font-size: 7px; }
+.gamepad-center { display: grid; justify-items: center; gap: 8px; }
+.gamepad-select,.gamepad-start { min-width: 56px; min-height: 23px; padding: 0 5px; border: 1px solid #08090a; border-radius: 12px; color: #c7cacc; background: linear-gradient(#646a6c,#262a2c); box-shadow: inset 0 1px #ffffff3b,0 2px 2px #0008; font: 800 7px ui-monospace,monospace; letter-spacing: .1em; }
+.gamepad-start { color: #edf2e9; }
+.game-face-buttons { position: relative; display: grid; grid-template: 34px 34px 34px / 34px 34px 34px; place-items: center; transform: rotate(-18deg); }
+.face { width: 31px; height: 31px; border: 1px solid #111; border-radius: 50%; color: #eef0f0; font: 800 17px/1 Arial,sans-serif; text-shadow: 0 1px 2px #000; box-shadow: inset 0 1px #ffffff66,inset 0 -3px 4px #0009,0 2px 2px #000b; }
+.face.triangle { grid-area: 1/2; background: radial-gradient(circle at 35% 28%,#5d9c89,#1c4841); }
+.face.square { grid-area: 2/1; background: radial-gradient(circle at 35% 28%,#a95b61,#54272c); }
+.face.cross { grid-area: 2/2; background: radial-gradient(circle at 35% 28%,#528b63,#204b2d); }
+.face.circle { grid-area: 2/3; background: radial-gradient(circle at 35% 28%,#587ea9,#263b5a); }
+.gamepad-bottom { display: grid; justify-items: center; gap: 7px; }
+.gamepad-bottom small { color: #9ba2a1; font: 600 6px ui-monospace,monospace; letter-spacing: .08em; text-align: center; }
+.gamepad-home { min-width: 64px; min-height: 25px; border: 1px solid #0b0c0d; border-radius: 14px; color: #a9ef83; background: linear-gradient(#555b5d,#262a2c); box-shadow: inset 0 1px #ffffff36,0 2px 3px #0008; font: 800 8px ui-monospace,monospace; letter-spacing: .2em; }
+.gamepad-no-game { display: grid; }
+.genesis-no-game { width: 296px; margin: 20px auto; display: grid; justify-items: center; gap: 10px; padding: 22px 14px; border: 1px solid #46524a; border-radius: 18px; color: #a6f07d; background: linear-gradient(#303538,#111416); text-align: center; }
+.genesis-no-game small { color: #bfc3c2; line-height: 1.4; }
+.gamepad-shoulders button.pressed,.stick-click.pressed,.game-dpad button.pressed,.face.pressed,.gamepad-center button.pressed { filter: brightness(.75); transform: translateY(1px); }
+.genesis-gamepad [data-game-button],.gamepad-home { touch-action: none; }

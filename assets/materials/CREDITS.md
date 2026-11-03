@@ -16,3 +16,7 @@ The following licensed files are retained in the source tree for possible future
 - **TV static audio** — joedeshon, [Freesound: tv_static_from wtic_in_1957.wav](https://freesound.org/people/joedeshon/sounds/78074/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The source is lightly filtered and looped.
 - **CRT power-on** — Fission9, [Freesound: CRT TV Switches On](https://freesound.org/people/Fission9/sounds/693860/), [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 - **CRT power-off** — Fission9, [Freesound: CRT TV Switches Off](https://freesound.org/people/Fission9/sounds/693861/), [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+# Font credits
+
+- **VT323** — The VT323 Project Authors (Peter Hull), [Google Fonts](https://fonts.google.com/specimen/VT323), licensed under the [SIL Open Font License 1.1](../fonts/VT323-OFL.txt). Used unmodified for the on-screen display lettering.

@@ -1,6 +1,11 @@
 const video = document.querySelector('#video');
 const canvas = document.querySelector('#picture');
+const genesisCanvas = document.querySelector('#genesisPicture');
+const breakFadeOverlay = document.querySelector('#breakFade');
+let channelBreakFadeLevel = 1;
+let channelBreakAdvanceSequence = null;
 const stage = document.querySelector('#stage');
+const youtubePlayerHost = document.querySelector('#youtubePlayerHost');
 const staticPicture = document.querySelector('#staticPicture');
 const compositeCanvas = document.createElement('canvas');
 const compositeContext = compositeCanvas.getContext('2d', { alpha: false });
@@ -27,19 +32,23 @@ const vhsScanDial = document.querySelector('#vhsScan');
 const glitchDial = document.querySelector('#glitch');
 const brokenTapeDial = document.querySelector('#brokenTape');
 const glowDial = document.querySelector('#glow');
-const glareDial = document.querySelector('#glare');
+const brightnessDial = document.querySelector('#brightness');
 const fxAmountDial = document.querySelector('#fxAmount');
 const pictureModeSelect = document.querySelector('#pictureMode');
 const displayModeSelect = document.querySelector('#displayMode');
 const pictureBypassToggle = document.querySelector('#pictureBypassToggle');
 const audioBypassToggle = document.querySelector('#audioBypassToggle');
+const tvLevelerToggle = document.querySelector('#tvLevelerToggle');
 const audioEffectSelect = document.querySelector('#audioEffectSelect');
 const cabinetTintInput = document.querySelector('#cabinetTint');
+const cabinetSkinSelect = document.querySelector('#cabinetSkin');
 const inputButton = document.querySelector('#inputButton');
+const auxLoadButton = document.querySelector('#auxLoadButton');
+const auxRomFile = document.querySelector('#auxRomFile');
 const soundEffectsToggle = document.querySelector('#soundEffectsToggle');
 const soundEffectsVolumeControl = document.querySelector('#soundEffectsVolume');
 const soundEffectsReadout = document.querySelector('#soundEffectsReadout');
-const pictureDials = [scanlineDial, curveDial, edgeBlurDial, hueDial, vhsScanDial, glitchDial, brokenTapeDial, glowDial, glareDial];
+const pictureDials = [scanlineDial, curveDial, edgeBlurDial, hueDial, vhsScanDial, glitchDial, brokenTapeDial, glowDial, brightnessDial];
 const allDials = [videoDial, ...pictureDials, fxAmountDial];
 const playlistSelect = document.querySelector('#playlistSelect');
 const playlistName = document.querySelector('#playlistName');
@@ -48,33 +57,48 @@ const channelStatus = document.querySelector('#channelStatus');
 const channelRootPath = document.querySelector('#channelRootPath');
 const channelSummary = document.querySelector('#channelSummary');
 const addChannelButton = document.querySelector('#addChannelButton');
+const chooseChannelSourceButton = document.querySelector('#chooseChannelSourceButton');
+const channelSourcePath = document.querySelector('#channelSourcePath');
 const rescanChannelButton = document.querySelector('#rescanChannelButton');
 const channelSurfName = document.querySelector('#channelSurfName');
 const channelSurfOverlay = document.querySelector('#channelSurfOverlay');
+const volumeOverlay = document.querySelector('#volumeOverlay');
+const muteOverlay = document.querySelector('#muteOverlay');
 const channelDownButton = document.querySelector('#channelDownButton');
 const channelUpButton = document.querySelector('#channelUpButton');
 const tvGuideDialog = document.querySelector('#tvGuideDialog');
 const tvGuidePage = document.querySelector('#tvGuidePage');
 const tvGuidePageContent = document.querySelector('#tvGuidePageContent');
 const tvSettingsDialog = document.querySelector('#tvSettingsDialog');
+const youtubeStarterRows = document.querySelector('#youtubeStarterRows');
 let guideRefreshTimer = null;
 let channelSurfOverlayTimer = null;
+let volumeOverlayTimer = null;
+// The level to return to while muted; null when sound is on.
+let mutedVolume = null;
 let tvGuidePageIndex = 0;
+let previousChannelId = null;
 const GUIDE_WINDOW_SECONDS = 6 * 60 * 60;
 const GUIDE_VISIBLE_PROGRAMS = 36;
 const TV_SEARCHING_GRACE_MS = 900;
 let tvSearching = false;
 let tvSearchingTimer = null;
+let channelStableSince = 0;
+let channelLoadPhase = 'TUNING...';
 let moviePrerollState = null;
 let moviePrerollMoviePath = '';
 const gl = canvas.getContext('webgl', { alpha: false, antialias: false, premultipliedAlpha: false });
 const PLAYLISTS_KEY = 'saturdayTube.playlists.v1';
 const CONTROLS_KEY = 'saturdayTube.controls.v1';
+const HAD_SAVED_CONTROL_PREFERENCES = localStorage.getItem(CONTROLS_KEY) !== null;
 const SESSION_KEY = 'saturdayTube.session.v1';
 const METADATA_KEY = 'saturdayTube.metadata.v2';
 const METADATA_OVERRIDE_KEY = 'saturdayTube.metadataOverrides.v1';
 const SHELF_KEY = 'saturdayTube.shelf.root.v1';
 const CHANNELS_KEY = 'saturdayTube.channels.v1';
+const CHANNEL_SOURCE_KEY = 'saturdayTube.channelSource.v1';
+const YOUTUBE_STARTERS_KEY = 'saturdayTube.youtubeStarters.v1';
+const YOUTUBE_ACTIVE_KEY = 'saturdayTube.activeYoutubeStarter.v1';
 const METADATA_TTL = 30 * 24 * 60 * 60 * 1000;
 const METADATA_MISS_TTL = 12 * 60 * 60 * 1000;
 const MAX_METADATA_CACHE_ENTRIES = 500;
@@ -135,17 +159,29 @@ let textureWidth = 0;
 let textureHeight = 0;
 let lastUploadedTime = -1;
 let lastRenderedSource = null;
-let lastRenderedExtension = null;
+const OSD_CANVAS_FONT = '"Saturday OSD", ui-monospace, SFMono-Regular, Menlo, monospace';
+// Canvas text can't wait for a web font, so repaint the cached picture once the OSD lettering arrives.
+document.fonts?.load?.(`48px ${OSD_CANVAS_FONT}`).then(() => { lastRenderedSource = null; }).catch(() => {});
 let glContextLost = false;
 let pictureFallback = false;
 let pictureFiltersEnabled = true;
 let audioFiltersEnabled = true;
+let tvLevelerEnabled = true;
+let levelerGain = null;
+let levelerCompressor = null;
+let levelerAnalyser = null;
+let levelerSamples = null;
+let levelerPower = null;
+let levelerFastUntil = 0;
+let levelerTimer = null;
 let selectedPictureMode = 'color';
 let displayMode = 'crt';
 let selectedAudioEffect = 'clean';
 let soundEffectsEnabled = true;
 let soundEffectsVolume = 100;
 let selectedInput = 'video';
+let auxReturnInput = 'video';
+let resumeVideoAfterAux = false;
 let transitionInput = '';
 let resumeVideoAfterStatic = false;
 let resumeTVAfterStatic = false;
@@ -154,6 +190,7 @@ let transitionStatic = false;
 let channelTuneToken = 0;
 let activeChannelTuneMetric = null;
 let channelPrewarmToken = 0;
+let channelPrewarmedGeneration = -1;
 let channelPrewarmPromise = null;
 let queuedChannelPrewarm = null;
 const MAX_ADJACENT_CHANNELS_TO_PREWARM = 2;
@@ -182,13 +219,20 @@ let effectDelay = null;
 let wowLfoGain = null;
 let humGain = null;
 let staticGain = null;
-let currentFinish = 'wood';
+let currentFinish = 'grey';
 let cabinetTint = '#9b6334';
+let cabinetSkin = 'molded';
 let playlists = [];
 let activePlaylistId = '';
 let channels = [];
 let activeChannelId = '';
+let activeYoutubeStarterId = localStorage.getItem(YOUTUBE_ACTIVE_KEY) || '';
+let youtubeStarterConfigurations = loadYoutubeStarterConfigurations();
 let channelsStartupReady = false;
+let channelWarmupPromise = null;
+let channelRefreshPromise = null;
+let channelShuffleStatus = '';
+let channelPriorityScanPromise = null;
 let channelSetupNotice = '';
 const channelAudioCompatibleMedia = new Map();
 const channelAudioCompatibilityJobs = new Map();
@@ -196,6 +240,7 @@ const CHANNEL_PLAYBACK_SAVE_INTERVAL_MS = 5000;
 const MAX_SAVED_CHANNEL_QUEUE_ENTRIES = 6000;
 const MAX_SAVED_CHANNEL_HISTORY_ENTRIES = 1000;
 let currentIndex = -1;
+let playingAuthenticTape = false;
 let pendingPlaybackRestore = null;
 let playbackRequestId = 0;
 const localTapeCopyJobs = new Map();
@@ -207,27 +252,30 @@ let fallbackAttempted = false;
 let playbackGeneration = 0;
 let activePlaybackGeneration = -1;
 let activePlaybackUrl = '';
+// A live channel stream starts at `baseSeconds` into its file and can't seek; video.currentTime counts from that point.
+let livePlayback = null;
 let activePlaybackChannelId = '';
 let activePlaybackTuneToken = -1;
 let activePlaybackPath = '';
-let extensionTimer = null;
-let visibleFileExtension = '';
 let cursorTimer = null;
 let frameLoopRequest = null;
+let pictureVisible = true;
+let lastPictureFrame = -Infinity;
 let shuttingOff = false;
 let pendingStartupShutoff = false;
 let startupIntroActive = true;
 
 const vertexSource = `attribute vec2 p; varying vec2 uv; void main(){ uv=(p+1.0)*0.5; gl_Position=vec4(p,0.0,1.0); }`;
 const fragmentSource = `precision mediump float;
-varying vec2 uv; uniform sampler2D frame; uniform vec2 resolution; uniform float time; uniform float strength; uniform float scan; uniform float edgeBlur; uniform float hueShift; uniform float vhsScan; uniform float glitch; uniform float broken; uniform float glow; uniform float glare; uniform float pictureMode; uniform float rearProjection;
+varying vec2 uv; uniform sampler2D frame; uniform vec2 resolution; uniform float time; uniform float strength; uniform float scan; uniform float edgeBlur; uniform float hueShift; uniform float vhsScan; uniform float glitch; uniform float broken; uniform float glow; uniform float pictureMode; uniform float rearProjection; uniform float vignette; uniform float chroma; uniform sampler2D osd; uniform float osdOn;
 float hash(float n){return fract(sin(n)*43758.5453);}
 mat3 hueTurn(float a){float c=cos(a),s=sin(a);return mat3(0.213+0.787*c-0.213*s,0.213-0.213*c+0.143*s,0.213-0.213*c-0.787*s,0.715-0.715*c-0.715*s,0.715+0.285*c+0.140*s,0.715-0.715*c+0.715*s,0.072-0.072*c+0.928*s,0.072-0.072*c-0.283*s,0.072+0.928*c+0.072*s);}
+vec4 osdSample(vec2 p,float radius){vec2 d=vec2(radius)/resolution;return texture2D(osd,p)*0.40+texture2D(osd,p+vec2(d.x,0.0))*0.15+texture2D(osd,p-vec2(d.x,0.0))*0.15+texture2D(osd,p+vec2(0.0,d.y))*0.15+texture2D(osd,p-vec2(0.0,d.y))*0.15;}
 vec3 softSample(vec2 p,float radius){vec2 d=vec2(radius)/resolution;return (texture2D(frame,p).rgb*0.40+texture2D(frame,p+vec2(d.x,0.0)).rgb*0.15+texture2D(frame,p-vec2(d.x,0.0)).rgb*0.15+texture2D(frame,p+vec2(0.0,d.y)).rgb*0.15+texture2D(frame,p-vec2(0.0,d.y)).rgb*0.15);}
 void main(){vec2 q=uv*2.0-1.0;float r2=dot(q,q);if(rearProjection<0.5)q*=1.0+strength*r2;vec2 t=q*0.5+0.5;t.y=1.0-t.y;if(t.x<0.0||t.x>1.0||t.y<0.0||t.y>1.0){gl_FragColor=vec4(0.025,0.03,0.025,1.0);return;}
-float row=floor(t.y*resolution.y/7.0);float twitch=(hash(row+floor(time*19.0))-0.5)*0.006*glitch;float tear=step(0.992,hash(floor(time*14.0)+floor(t.y*23.0)))*glitch*0.012;float eventRate=0.12+vhsScan*0.65;float eventIndex=floor(time*eventRate);float eventPulse=step(0.80,hash(eventIndex+19.0));float bandY=fract(hash(eventIndex+41.0)+time*(0.02+vhsScan*0.20));float bandWidth=0.003+vhsScan*0.003;float triangularBand=max(0.0,1.0-abs(t.y-bandY)/bandWidth);float edgeJitter=(hash(row+eventIndex*3.0)-0.5);float tracking=eventPulse*triangularBand*edgeJitter*(0.008+vhsScan*0.025)*step(0.001,vhsScan);float microJitter=(hash(row+floor(time*(8.0+vhsScan*50.0)))-0.5)*vhsScan*0.0015;t.x=clamp(t.x+twitch+tear+tracking+microJitter,0.0,1.0);
-float edge=smoothstep(0.15,1.15,r2);float blurRadius=edge*edgeBlur*1.2+rearProjection*0.65;float split=0.00015+vhsScan*0.0008+glitch*0.001;vec3 col=softSample(t,blurRadius);col.r=softSample(clamp(t+vec2(split,0.0),0.0,1.0),blurRadius).r;col.b=softSample(clamp(t-vec2(split,0.0),0.0,1.0),blurRadius).b;
-col=hueTurn((hueShift-0.5)*6.28318)*col;float luma=dot(col,vec3(0.299,0.587,0.114));if(pictureMode>1.5)col=vec3(luma);else if(pictureMode>0.5){vec3 warm=vec3(luma*1.04,luma*1.01,luma*0.94);col=mix(col,warm,0.68);col=clamp((col-0.5)*0.82+0.5,0.0,1.0);}float lines=0.985+0.015*sin(t.y*resolution.y*3.14159);col*=mix(1.0,lines,scan);float dropout=step(0.995,hash(floor(t.y*resolution.y/3.0)+floor(time*8.0)))*broken*0.14;float snow=hash(floor(t.x*resolution.x/2.0)+floor(t.y*resolution.y/2.0)+floor(time*35.0))-0.5;col*=1.0-dropout;col+=snow*broken*0.012;vec3 bloom=max(softSample(t,2.0+glow*10.0)-vec3(0.62),vec3(0.0));col+=bloom*glow*0.42;float corner=1.0-0.12*r2;col*=corner;float grille=0.99+0.01*cos(t.x*resolution.x*3.14159);col*=mix(1.0,grille,scan*0.22);if(rearProjection>0.5){col=col*0.88+vec3(0.035,0.03,0.024);col=pow(max(col,vec3(0.0)),vec3(0.96));}float reflection=exp(-length((uv-vec2(0.21,0.18))*vec2(1.15,1.0))*10.0)*glare*0.11;col+=vec3(0.82,0.91,1.0)*reflection;gl_FragColor=vec4(col,1.0);}`;
+vec2 screenT=t;float row=floor(t.y*resolution.y/7.0);float twitch=(hash(row+floor(time*19.0))-0.5)*0.006*glitch;float tear=step(0.992,hash(floor(time*14.0)+floor(t.y*23.0)))*glitch*0.012;float eventRate=0.12+vhsScan*0.65;float eventIndex=floor(time*eventRate);float eventPulse=step(0.80,hash(eventIndex+19.0));float bandY=fract(hash(eventIndex+41.0)+time*(0.02+vhsScan*0.20));float bandWidth=0.003+vhsScan*0.003;float triangularBand=max(0.0,1.0-abs(t.y-bandY)/bandWidth);float edgeJitter=(hash(row+eventIndex*3.0)-0.5);float tracking=eventPulse*triangularBand*edgeJitter*(0.008+vhsScan*0.025)*step(0.001,vhsScan);float microJitter=(hash(row+floor(time*(8.0+vhsScan*50.0)))-0.5)*vhsScan*0.0015;t.x=clamp(t.x+twitch+tear+tracking+microJitter,0.0,1.0);
+float edge=smoothstep(0.15,1.15,r2);float blurRadius=edge*edgeBlur*1.2+rearProjection*0.65;float split=chroma*0.00015+vhsScan*0.0008+glitch*0.001;vec3 col=softSample(t,blurRadius);col.r=softSample(clamp(t+vec2(split,0.0),0.0,1.0),blurRadius).r;col.b=softSample(clamp(t-vec2(split,0.0),0.0,1.0),blurRadius).b;vec4 o=vec4(0.0);vec3 osdBloom=vec3(0.0);float osdAlpha=0.0;if(osdOn>0.5){float osdSplit=chroma*0.0005;o=osdSample(screenT,blurRadius);vec4 oR=osdSample(clamp(screenT+vec2(osdSplit,0.0),0.0,1.0),blurRadius);vec4 oB=osdSample(clamp(screenT-vec2(osdSplit,0.0),0.0,1.0),blurRadius);col=col*(1.0-o.a)+vec3(oR.r,o.g,oB.b);osdAlpha=o.a;vec4 ob=osdSample(screenT,2.0+glow*10.0);osdBloom=ob.rgb;}
+col=hueTurn((hueShift-0.5)*6.28318)*col;float luma=dot(col,vec3(0.299,0.587,0.114));if(pictureMode>1.5)col=vec3(luma);else if(pictureMode>0.5){vec3 warm=vec3(luma*1.04,luma*1.01,luma*0.94);col=mix(col,warm,0.68);col=clamp((col-0.5)*0.82+0.5,0.0,1.0);}float lineCount=clamp(resolution.y/3.0,120.0,240.0);float lineWave=0.5-0.5*cos(t.y*lineCount*6.28318);col*=1.0-scan*0.2*lineWave;float dropout=step(0.995,hash(floor(t.y*resolution.y/3.0)+floor(time*8.0)))*broken*0.14;float snow=hash(floor(t.x*resolution.x/2.0)+floor(t.y*resolution.y/2.0)+floor(time*35.0))-0.5;col*=1.0-dropout*(1.0-osdAlpha);col+=snow*broken*0.012*(1.0-osdAlpha);vec3 bloom=max(max(softSample(t,2.0+glow*10.0),osdBloom)-vec3(0.62),vec3(0.0));col+=bloom*glow*0.42;float corner=1.0-0.12*r2*vignette;col*=corner;float grille=0.99+0.01*cos(t.x*resolution.x*3.14159);col*=mix(1.0,grille,scan*0.22);if(rearProjection>0.5){col=col*0.88+vec3(0.035,0.03,0.024);col=pow(max(col,vec3(0.0)),vec3(0.96));}gl_FragColor=vec4(col,1.0);}`;
 
 function shader(type, source) {
   const item = gl.createShader(type);
@@ -260,11 +308,22 @@ function setupGL() {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
   textureWidth = 1;
   textureHeight = 1;
+  osdTexture = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, osdTexture);
+  for (const [name, value] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, name, value);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+  gl.activeTexture(gl.TEXTURE0);
+  osdTextureWidth = 1;
+  osdTextureHeight = 1;
+  osdLayerVisible = false;
   lastUploadedTime = -1;
   glContextLost = false;
   return true;
 }
 function setStatus(text) { statusEl.textContent = text.toUpperCase(); }
+try { window.SaturdayGenesisAux?.init(genesisCanvas); }
+catch (error) { console.error('Genesis AUX could not initialize.', error); setStatus('GENESIS AUX UNAVAILABLE'); }
 function setPictureFallback(active) {
   pictureFallback = active;
   canvas.hidden = active;
@@ -361,6 +420,7 @@ function primeSoundEffects() {
   }
 }
 function playSoundEffect(key, { loop = false, level = 1, restart = true } = {}) {
+  if (window.SaturdayIntermission?.active) return null;
   const audio = soundEffectAudio.get(key);
   if (!audio || !soundEffectsEnabled || soundEffectsVolume <= 0) return null;
   const playToken = (soundEffectPlayTokens.get(key) || 0) + 1;
@@ -398,7 +458,7 @@ function setLoopingSoundEffect(key, active, level) {
   if (audio.paused) playSoundEffect(key, { loop: true, level, restart: false });
 }
 function syncStaticPictureAudio() {
-  const level = (selectedInput === 'static' || transitionStatic) && soundEffectsEnabled
+  const level = !window.SaturdayIntermission?.active && (selectedInput === 'static' || transitionStatic) && soundEffectsEnabled
     ? Math.max(0, Math.min(4, soundEffectsVolume / 100 * 0.45)) : 0;
   if (staticPictureGain && soundEffectsAudioContext) {
     staticPicture.muted = false;
@@ -410,7 +470,7 @@ function syncStaticPictureAudio() {
   }
 }
 function syncLoopingSoundEffects() {
-  const playingHum = hasVideo && !video.paused && !shuttingOff && selectedAudioEffect === 'hum' && audioFiltersEnabled;
+  const playingHum = hasVideo && !video.paused && !shuttingOff && selectedAudioEffect === 'hum' && audioFiltersEnabled && !playingAuthenticTape;
   const humLevel = 0.35 * (0.35 + 0.65 * dialValue(fxAmountDial) / 100);
   setLoopingSoundEffect('hum', playingHum, humLevel);
   syncStaticPictureAudio();
@@ -569,20 +629,79 @@ async function chooseAudioOutput() {
     console.warn('Audio output device was not selected', error);
   }
 }
-function setMasterVolume() {
-  const volume = dialValue(videoDial) / 100;
+// Channel commercials are genuine off-air VHS recordings: they already carry their own tape wear and hiss, so they play
+// a little quieter, without the simulated audio tape effects or the VHS tracking lines (other picture effects still apply).
+const AUTHENTIC_TAPE_VOLUME = 0.8;
+function isAuthenticTapeTrack(track) {
+  return track?.channelAd === true || track?.segmentType === 'commercial';
+}
+function setPlayingAuthenticTape(enabled) {
+  enabled = enabled === true;
+  if (playingAuthenticTape === enabled) return;
+  playingAuthenticTape = enabled;
+  setMasterVolume();
+  applyAudioEffect(false);
+}
+// Like a real set, the top of the volume dial drives the speaker past clean: full volume is 120% gain and loud
+// programmes can clip, so a comfortable listening level sits well below the end stop.
+const TV_VOLUME_BOOST = 1.2;
+function dialVolumeGain() {
+  return dialValue(videoDial) / 100 * TV_VOLUME_BOOST;
+}
+function setMasterVolume(fadeOnly = false) {
+  const volume = dialVolumeGain() * channelBreakFadeLevel * (playingAuthenticTape ? AUTHENTIC_TAPE_VOLUME : 1);
   video.defaultMuted = false;
+  if (typeof window !== 'undefined' && window.SaturdayTubeYouTubePlayer?.getPlayer?.()) window.SaturdayTubeYouTubePlayer.setVolume(Math.min(100, Math.round(volume * 100)), mutedVolume !== null);
   if (masterGain) {
     video.volume = 1;
     video.muted = false;
-    smoothAudioParam(masterGain.gain, volume);
+    if (volume === 0 && audioContext) {
+      masterGain.gain.cancelScheduledValues(audioContext.currentTime);
+      masterGain.gain.setValueAtTime(0, audioContext.currentTime);
+    } else if (fadeOnly && audioContext) masterGain.gain.setTargetAtTime(volume, audioContext.currentTime, 0.015);
+    else smoothAudioParam(masterGain.gain, volume);
   } else {
-    video.volume = volume;
+    video.volume = Math.min(1, volume);
     video.muted = false;
   }
 }
 function needsAudioEffectGraph() {
-  return audioFiltersEnabled && selectedAudioEffect !== 'clean';
+  return (audioFiltersEnabled && selectedAudioEffect !== 'clean') || tvLevelerActive() || dialVolumeGain() > 1;
+}
+// TV leveler: a slow automatic gain measured ahead of the volume dial brings every programme, movie and ad to about the
+// same loudness, adapting quickly when a new file starts; a gentle compressor catches peaks while the gain settles.
+const TV_LEVELER_TARGET_DB = -22;
+const TV_LEVELER_GATE_DB = -52;
+const TV_LEVELER_MAX_GAIN_DB = 15;
+function tvLevelerActive() {
+  return tvLevelerEnabled && selectedInput === 'tv';
+}
+function updateTVLeveler() {
+  if (!levelerGain || !audioContext) return;
+  const active = tvLevelerActive();
+  const now = audioContext.currentTime;
+  levelerCompressor.threshold.setTargetAtTime(active ? -24 : 0, now, 0.05);
+  levelerCompressor.ratio.setTargetAtTime(active ? 4 : 1, now, 0.05);
+  if (!active) {
+    levelerGain.gain.setTargetAtTime(1, now, 0.3);
+    if (levelerTimer) { window.clearInterval(levelerTimer); levelerTimer = null; }
+    return;
+  }
+  if (!levelerTimer) levelerTimer = window.setInterval(stepTVLeveler, 100);
+}
+function stepTVLeveler() {
+  if (!levelerAnalyser || !tvLevelerActive() || !hasVideo || video.paused || video.seeking) return;
+  levelerAnalyser.getFloatTimeDomainData(levelerSamples);
+  let power = 0;
+  for (const sample of levelerSamples) power += sample * sample;
+  power /= levelerSamples.length;
+  // Silence and near-silence are ignored so pauses are never pumped up into hiss.
+  if (10 * Math.log10(Math.max(power, 1e-12)) < TV_LEVELER_GATE_DB) return;
+  const fast = performance.now() < levelerFastUntil;
+  levelerPower = levelerPower === null ? power : levelerPower + (fast ? 0.3 : 0.035) * (power - levelerPower);
+  const loudnessDb = 10 * Math.log10(Math.max(levelerPower, 1e-12));
+  const gainDb = Math.max(-TV_LEVELER_MAX_GAIN_DB, Math.min(TV_LEVELER_MAX_GAIN_DB, TV_LEVELER_TARGET_DB - loudnessDb));
+  levelerGain.gain.setTargetAtTime(10 ** (gainDb / 20), audioContext.currentTime, fast ? 0.12 : 0.5);
 }
 function ensureAudioGraph() {
   if (audioGraphFailed) return false;
@@ -593,6 +712,16 @@ function ensureAudioGraph() {
   try {
     audioContext = new AudioContextType();
     mediaSource = audioContext.createMediaElementSource(video);
+    levelerGain = audioContext.createGain();
+    levelerCompressor = audioContext.createDynamicsCompressor();
+    levelerCompressor.knee.value = 10;
+    levelerCompressor.attack.value = 0.006;
+    levelerCompressor.release.value = 0.3;
+    levelerCompressor.threshold.value = 0;
+    levelerCompressor.ratio.value = 1;
+    levelerAnalyser = audioContext.createAnalyser();
+    levelerAnalyser.fftSize = 4096;
+    levelerSamples = new Float32Array(levelerAnalyser.fftSize);
     dryGain = audioContext.createGain();
     wetGain = audioContext.createGain();
     masterGain = audioContext.createGain();
@@ -639,9 +768,12 @@ function ensureAudioGraph() {
     staticGain.connect(masterGain);
     noiseSource.start();
 
-    mediaSource.connect(dryGain);
+    mediaSource.connect(levelerAnalyser);
+    mediaSource.connect(levelerGain);
+    levelerGain.connect(levelerCompressor);
+    levelerCompressor.connect(dryGain);
     dryGain.connect(masterGain);
-    mediaSource.connect(effectHighpass);
+    levelerCompressor.connect(effectHighpass);
     effectHighpass.connect(effectLowpass);
     effectLowpass.connect(effectPeak);
     effectPeak.connect(effectDrive);
@@ -660,16 +792,19 @@ function ensureAudioGraph() {
     video.muted = false;
     applyAudioEffect(false);
     setMasterVolume();
+    updateTVLeveler();
     return true;
   } catch (error) {
     audioGraphFailed = true;
     if (mediaSource && audioContext) {
       try {
         mediaSource.disconnect();
+        levelerAnalyser = null;
+        levelerGain = null;
         humGain?.disconnect();
         staticGain?.disconnect();
         const cleanOutput = audioContext.createGain();
-        cleanOutput.gain.value = dialValue(videoDial) / 100;
+        cleanOutput.gain.value = dialVolumeGain();
         cleanOutput.connect(audioContext.destination);
         mediaSource.connect(cleanOutput);
         masterGain = cleanOutput;
@@ -696,7 +831,9 @@ async function unlockPlaybackAudio() {
   return !audioContext || audioContext.state === 'running';
 }
 async function startVideoPlayback() {
+  if (window.SaturdayIntermission?.active) return;
   await unlockPlaybackAudio();
+  if (window.SaturdayIntermission?.active) return;
   video.defaultMuted = false;
   video.muted = false;
   setMasterVolume();
@@ -704,7 +841,7 @@ async function startVideoPlayback() {
 }
 function applyAudioEffect(save = true) {
   const preset = AUDIO_EFFECTS[selectedAudioEffect] || AUDIO_EFFECTS.clean;
-  const mix = !audioFiltersEnabled || selectedAudioEffect === 'clean' ? 0 : dialValue(fxAmountDial) / 100 * preset.mix;
+  const mix = !audioFiltersEnabled || selectedAudioEffect === 'clean' || playingAuthenticTape ? 0 : dialValue(fxAmountDial) / 100 * preset.mix;
   audioEffectSelect.value = selectedAudioEffect;
   if (save && needsAudioEffectGraph() && !audioContext) ensureAudioGraph();
   if (save && audioContext?.state === 'suspended') audioContext.resume().catch(error => console.warn('Playback audio context did not resume', error));
@@ -746,6 +883,16 @@ function setCabinetTint(value, save = true) {
   document.body.style.setProperty('--cabinet-tint', cabinetTint);
   if (save) saveControlPreferences();
 }
+function setCabinetSkin(name, save = true) {
+  if (!['molded', 'smooth', 'woodgrain', 'field'].includes(name)) {
+    console.warn('Unknown cabinet texture skin', name);
+    return;
+  }
+  cabinetSkin = name;
+  cabinetSkinSelect.value = name;
+  tvSet.dataset.skin = name;
+  if (save) saveControlPreferences();
+}
 function saveControlPreferences() {
   try {
     localStorage.setItem(CONTROLS_KEY, JSON.stringify({
@@ -753,15 +900,18 @@ function saveControlPreferences() {
       effect: selectedAudioEffect,
       finish: currentFinish,
       cabinetTint,
+      cabinetSkin,
       pictureFiltersEnabled,
       audioFiltersEnabled,
+      tvLevelerEnabled,
       pictureMode: selectedPictureMode,
       displayMode,
-      input: selectedInput,
+      input: selectedInput === 'aux' ? 'video' : selectedInput,
       soundEffectsEnabled,
       soundEffectsVolume,
       activePlaylistId,
-      audioOutputId: preferredAudioOutputId
+      audioOutputId: preferredAudioOutputId,
+      volumeBeforeMute: mutedVolume
     }));
   } catch (error) { console.warn('Control preferences could not be saved', error); }
 }
@@ -773,16 +923,19 @@ function restoreControlPreferences() {
       const value = saved.dials?.[dial.id];
       if (Number.isFinite(value)) setDialValue(dial, value);
     }
+    mutedVolume = Number.isFinite(saved.volumeBeforeMute) && saved.volumeBeforeMute > 0 ? saved.volumeBeforeMute : null;
     const legacyTints = { yellow: '#c49a32', red: '#b54642', green: '#39804d', blue: '#3e6caa' };
     const legacyFinish = ['yellow', 'red', 'green', 'blue'].includes(saved.finish) ? saved.finish : '';
     setFinish(legacyFinish ? 'wood' : saved.finish, false);
     setCabinetTint(saved.cabinetTint || legacyTints[legacyFinish] || cabinetTint, false);
+    if (typeof saved.cabinetSkin === 'string') setCabinetSkin(saved.cabinetSkin, false);
     if (typeof saved.effect === 'string') setAudioEffect(saved.effect, false);
     if (typeof saved.pictureFiltersEnabled === 'boolean') pictureFiltersEnabled = saved.pictureFiltersEnabled;
     else if (typeof saved.videoFiltersEnabled === 'boolean' || typeof saved.tvFiltersEnabled === 'boolean') {
       pictureFiltersEnabled = saved.videoFiltersEnabled !== false && saved.tvFiltersEnabled !== false;
     }
     if (typeof saved.audioFiltersEnabled === 'boolean') audioFiltersEnabled = saved.audioFiltersEnabled;
+    if (typeof saved.tvLevelerEnabled === 'boolean') tvLevelerEnabled = saved.tvLevelerEnabled;
     if (typeof saved.audioOutputId === 'string') preferredAudioOutputId = saved.audioOutputId;
     if (['color', 'lowstim', 'bw'].includes(saved.pictureMode)) selectedPictureMode = saved.pictureMode;
     if (['crt', 'rear'].includes(saved.displayMode)) displayMode = saved.displayMode;
@@ -800,26 +953,41 @@ function syncBypassControls() {
   pictureBypassToggle.setAttribute('aria-pressed', String(!pictureFiltersEnabled));
   audioBypassToggle.classList.toggle('on', !audioFiltersEnabled);
   audioBypassToggle.setAttribute('aria-pressed', String(!audioFiltersEnabled));
+  tvLevelerToggle.classList.toggle('on', tvLevelerEnabled);
+  tvLevelerToggle.setAttribute('aria-pressed', String(tvLevelerEnabled));
+  if (tvLevelerActive() && !audioContext && hasVideo) ensureAudioGraph();
+  updateTVLeveler();
   const modeLabel = pictureFiltersEnabled ? ({ color: 'COLOR', lowstim: 'LOWSTIM', bw: 'B&W' }[selectedPictureMode] || 'COLOR') : 'COLOR';
-  const outputMode = selectedInput === 'static' ? 'STATIC' : selectedInput === 'tv' ? 'TV' : pictureFiltersEnabled && displayMode === 'rear' ? 'REAR PROJECTION' : 'CRT';
+  const outputMode = selectedInput === 'static' ? 'SAT' : selectedInput === 'tv' ? 'TV' : selectedInput === 'aux' ? 'GENESIS AUX' : pictureFiltersEnabled && displayMode === 'rear' ? 'REAR PROJECTION' : 'CRT';
   const visibleInput = transitionStatic && transitionInput ? transitionInput : selectedInput;
   const previousVisibleInput = tvSet.dataset.input;
   tvSet.dataset.input = visibleInput;
   document.body.dataset.input = visibleInput;
+  const youtubePlaying = selectedInput === 'tv' && Boolean(activeYoutubeStarter());
+  for (const button of document.querySelectorAll('.under-screen .transport-key')) {
+    button.disabled = selectedInput === 'aux' || (selectedInput === 'tv' && !youtubePlaying);
+    button.title = selectedInput === 'aux' ? 'Tape controls are unavailable on AUX input' : selectedInput === 'tv' && !youtubePlaying ? 'Tape controls are available on VIDEO input' : '';
+  }
+  seek.disabled = selectedInput === 'tv' || selectedInput === 'aux';
+  if (visibleInput !== 'tv' && tvGuideDialog.open) tvGuideDialog.close();
+  const tapesTab = document.querySelector('[data-settings-tab="tapes"]');
+  tapesTab.hidden = visibleInput === 'tv';
+  if (tapesTab.hidden && tapesTab.hasAttribute('aria-current')) selectSettingsTab('video');
   if (previousVisibleInput && previousVisibleInput !== visibleInput) lastRenderedSource = null;
   document.querySelector('#displayBadge').textContent = `${modeLabel} ${outputMode}`;
-  inputButton.textContent = selectedInput === 'static' ? 'STATIC' : selectedInput === 'tv' ? 'TV' : 'VIDEO';
-  inputButton.setAttribute('aria-pressed', String(selectedInput === 'static' || selectedInput === 'tv'));
-  inputButton.setAttribute('aria-label', `Input is ${selectedInput.toUpperCase()}; cycle to the next input`);
+  inputButton.textContent = selectedInput === 'static' ? 'SAT' : selectedInput === 'tv' ? 'TV' : selectedInput === 'aux' ? 'AUX' : 'VIDEO';
+  inputButton.setAttribute('aria-pressed', String(selectedInput !== 'video'));
+  inputButton.setAttribute('aria-label', `Input is ${selectedInput === 'static' ? 'SAT' : selectedInput === 'aux' ? 'AUX' : selectedInput.toUpperCase()}; cycle to the next input`);
   const pictureInput = tvSet.dataset.input || selectedInput;
   document.querySelector('#emptyState .empty-copy').hidden = pictureInput === 'tv';
   document.querySelector('#picture').setAttribute('aria-label', pictureInput === 'tv'
     ? 'CRT picture: A little Saturday magic.'
-    : 'CRT picture: A little Saturday magic. Open the tape shelf from the VHS loader at right.');
+    : 'CRT picture: A little Saturday magic. Open the tape shelf from the VHS loader below.');
 }
 function startStaticPicture() {
+  if (window.SaturdayIntermission?.active) return;
   if (!staticInputUrl) {
-    setStatus('STATIC INPUT IS LOADING');
+    setStatus('SAT INPUT IS LOADING');
     return;
   }
   ensureSoundEffectsAudioGraph();
@@ -827,7 +995,7 @@ function startStaticPicture() {
   resumeSoundEffectsAudioContext();
   staticPicture.play().catch(error => {
     console.warn('TV static picture/audio did not start', error);
-    setStatus('STATIC INPUT COULD NOT PLAY');
+    setStatus('SAT INPUT COULD NOT PLAY');
   });
 }
 function pauseVideoForInputSwitch() {
@@ -837,8 +1005,13 @@ function pauseVideoForInputSwitch() {
   switchingTracks = false;
 }
 function setInputSource(source, save = true) {
-  const next = ['static', 'tv'].includes(source) ? source : 'video';
+  const next = ['static', 'tv', 'aux'].includes(source) ? source : 'video';
   const previous = selectedInput;
+  if (next === 'aux' && previous !== 'aux') {
+    auxReturnInput = previous === 'static' ? staticReturnInput : previous;
+    resumeVideoAfterAux = auxReturnInput === 'video' && hasVideo && !video.paused;
+  }
+  window.tube.setPlaybackPriority?.(next !== 'static' && next !== 'aux');
   if (save && startupIntroActive) {
     startupIntroActive = false;
     stage.classList.remove('startup-intro');
@@ -857,9 +1030,10 @@ function setInputSource(source, save = true) {
     resumeTVAfterStatic = previous === 'tv' && hasVideo && !video.paused;
     pauseVideoForInputSwitch();
   } else if (previous === 'tv') {
-    saveChannelPlaybackState();
+    if (!activeYoutubeStarter()) saveChannelPlaybackState();
+    window.SaturdayTubeYouTubePlayer?.stop();
     pauseVideoForInputSwitch();
-  } else if (previous === 'video' && next === 'tv') {
+  } else if (previous === 'video' && (next === 'tv' || next === 'aux')) {
     pauseVideoForInputSwitch();
   }
 
@@ -868,6 +1042,7 @@ function setInputSource(source, save = true) {
     transitionInput = '';
     selectedInput = next;
     setTVSearching(next === 'tv');
+    window.SaturdayGenesisAux?.setActive(next === 'aux');
     if (next === 'tv' && previous !== 'tv') clearChannelVideoForInputChange();
     if (next === 'static') {
       stage.classList.add('static-channel');
@@ -878,6 +1053,12 @@ function setInputSource(source, save = true) {
       syncStaticPictureAudio();
       if (next === 'tv') {
         void startActiveChannel();
+      } else if (previous === 'aux' || (previous === 'static' && staticReturnInput === 'aux')) {
+        if (next === 'video') {
+          clearChannelVideoForInputChange();
+          if (auxReturnInput === 'tv') void restoreManualVideoSession();
+          else if (resumeVideoAfterAux && hasVideo) startVideoPlayback().catch(() => {});
+        }
       } else if ((previous === 'tv') || (previous === 'static' && staticReturnInput === 'tv')) {
         clearChannelVideoForInputChange();
         void restoreManualVideoSession();
@@ -906,8 +1087,10 @@ function formatBytes(bytes) {
 }
 function metadataKey(request) {
   const query = String(request?.query || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('en-US').replace(/[^a-z0-9]+/g, '');
+  const mode = request?.mode === 'series' ? 'series' : 'title';
   return [
-    request?.mode === 'series' ? 'series' : 'title',
+    mode,
+    mode === 'title' ? 'v2' : '',
     query,
     /^\d{4}$/.test(String(request?.year || '')) ? request.year : '',
     /^\d{4}$/.test(String(request?.seriesYear || '')) ? request.seriesYear : '',
@@ -984,9 +1167,9 @@ function renderMetadata(view, metadata) {
     : mode === 'series'
       ? (metadata?.year ? `Series · ${metadata.year}` : 'TV SERIES')
       : [metadata?.year || parsed.year].filter(Boolean).join('') || 'LOCAL TAPE';
-  view.captionTitle.textContent = title;
+  view.captionTitle.textContent = view.collection?.name || title;
   view.captionTitle.title = title;
-  view.captionDetail.textContent = subtitle;
+  view.captionDetail.textContent = view.collection ? `${view.collection.items.length} episodes · Look inside` : subtitle;
   view.captionDetail.title = subtitle;
   const technical = [
     `File: ${item.name}`,
@@ -1137,7 +1320,7 @@ function drawLibraryBreadcrumbs() {
 }
 function updateLibrarySelection() {
   const count = librarySelection.size;
-  document.querySelector('#librarySelectionCount').textContent = count ? `${count} TAPE${count === 1 ? '' : 'S'} SELECTED · ADD TO PLAYLIST` : 'TAP A TAPE TO PLAY · SHIFT-TAP TO QUEUE';
+  document.querySelector('#librarySelectionCount').textContent = count ? `${count} TAPE${count === 1 ? '' : 'S'} SET ASIDE · READY TO WATCH` : 'PICK A TAPE TO WATCH · SHIFT-CLICK TO SET ASIDE';
   libraryAddButton.disabled = count === 0;
   libraryShelves.querySelectorAll('.library-tape[data-tape-path]').forEach(card => {
     const selected = librarySelection.has(card.dataset.tapePath);
@@ -1145,7 +1328,31 @@ function updateLibrarySelection() {
     card.querySelector('.library-tape-play')?.setAttribute('aria-pressed', String(selected));
   });
 }
-function makeLibraryCard(item, folder = false) {
+let libraryCollection = null;
+function groupLibraryTapes(files) {
+  const groups = new Map();
+  const singles = [];
+  for (const item of files) {
+    const parsed = window.tube.parseMetadataFilename(item.name);
+    if (!parsed.episodeCode || !parsed.query) {
+      singles.push(item);
+      continue;
+    }
+    const key = parsed.query.trim().toLocaleLowerCase();
+    if (!groups.has(key)) groups.set(key, { name: parsed.query, items: [] });
+    groups.get(key).items.push(item);
+  }
+  const collections = [];
+  for (const group of groups.values()) {
+    if (group.items.length < 2) singles.push(...group.items);
+    else {
+      group.items.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      collections.push(group);
+    }
+  }
+  return { collections, singles };
+}
+function makeLibraryCard(item, folder = false, collection = null) {
   const card = document.createElement(folder ? 'button' : 'article');
   if (folder) card.type = 'button';
   card.className = folder ? 'library-folder-card' : 'library-tape';
@@ -1158,7 +1365,7 @@ function makeLibraryCard(item, folder = false) {
     const name = document.createElement('strong');
     name.textContent = item.name;
     const note = document.createElement('small');
-    note.textContent = 'OPEN SHELF';
+    note.textContent = 'LOOK INSIDE';
     card.append(icon, name, note);
     card.addEventListener('click', () => loadLibraryFolder(item.path));
     return card;
@@ -1166,7 +1373,7 @@ function makeLibraryCard(item, folder = false) {
   const play = document.createElement('button');
   play.type = 'button';
   play.className = 'library-tape-play';
-  play.setAttribute('aria-label', `Play ${item.name}`);
+  play.setAttribute('aria-label', collection ? `Browse ${collection.name} episodes` : `Play ${item.name}`);
   play.setAttribute('aria-pressed', String(librarySelection.has(item.path)));
   const artwork = document.createElement('span');
   artwork.className = 'library-artwork-frame';
@@ -1199,7 +1406,7 @@ function makeLibraryCard(item, folder = false) {
   const details = document.createElement('details');
   details.className = 'library-tape-info';
   const summary = document.createElement('summary');
-  summary.textContent = 'INFO · MATCH';
+  summary.textContent = 'ABOUT THIS TAPE';
   const panel = document.createElement('div');
   panel.className = 'library-tape-info-panel';
   const technical = document.createElement('p');
@@ -1234,7 +1441,7 @@ function makeLibraryCard(item, folder = false) {
   details.append(summary, panel);
   card.append(play, artworkStatus, note, details);
   const view = {
-    item, card, play, note, cover, cassette, artworkStatus, parsed: window.tube.parseMetadataFilename(item.name),
+    item, card, play, note, cover, cassette, artworkStatus, collection, parsed: window.tube.parseMetadataFilename(item.name),
     captionTitle: name, captionDetail: subtitle, technical, editorTitle, editorYear, editorMode,
     renderToken: 0, manualLookupToken: 0, metadata: null
   };
@@ -1253,6 +1460,13 @@ function makeLibraryCard(item, folder = false) {
     setArtworkStatus(card, artworkStatus, 'COVER UNAVAILABLE · VHS LABEL SHOWN', 'error');
   });
   play.addEventListener('click', event => {
+    if (collection) {
+      libraryCollection = collection;
+      librarySearch.value = '';
+      renderLibrary();
+      libraryShelves.querySelector('button')?.focus();
+      return;
+    }
     if (event.shiftKey) {
       if (librarySelection.has(item.path)) librarySelection.delete(item.path);
       else librarySelection.add(item.path);
@@ -1325,7 +1539,7 @@ function addLibraryShelf(title, items, folder = false) {
 function renderLibrary() {
   drawLibraryBreadcrumbs();
   if (!libraryView) {
-    libraryDestination.textContent = 'LOCAL MAC SHELF · ORIGINALS KEPT';
+    libraryDestination.textContent = 'YOUR OWN LITTLE TAPE COLLECTION';
     libraryDestination.title = 'Adding a tape makes an app-managed local copy; source files are kept.';
     document.querySelector('#libraryCount').textContent = 'SHELVES EMPTY';
     libraryEmpty('THE SHELVES ARE WAITING', 'Set a destination on this Mac. Imports are safely copied there and stay on your shelf after restart.');
@@ -1333,16 +1547,46 @@ function renderLibrary() {
     return;
   }
   const rootLabel = libraryView.root.split('/').filter(Boolean).at(-1) || 'LOCAL SHELF';
-  libraryDestination.textContent = `SHELF: ${rootLabel} · LOCAL COPIES ON THIS MAC`;
+  libraryDestination.textContent = libraryCollection?.name || `YOUR TAPES · ${rootLabel}`;
   libraryDestination.title = `${libraryView.root} · Adding tapes copies them into Saturday Tube local storage.`;
   const query = librarySearch.value.trim().toLocaleLowerCase();
-  const directories = libraryView.directories.filter(item => item.name.toLocaleLowerCase().includes(query));
-  const files = libraryView.files.filter(item => item.name.toLocaleLowerCase().includes(query));
+  const directories = libraryCollection ? [] : libraryView.directories.filter(item => item.name.toLocaleLowerCase().includes(query));
+  const available = libraryCollection ? libraryCollection.items : libraryView.files;
+  const files = available.filter(item => item.name.toLocaleLowerCase().includes(query));
   const omitted = libraryView.omitted ? ` · ${libraryView.omitted} MORE IN THIS FOLDER` : '';
   document.querySelector('#libraryCount').textContent = `${files.length} TAPE${files.length === 1 ? '' : 'S'}${omitted}`;
   libraryShelves.replaceChildren();
-  addLibraryShelf('FOLDERS · OPEN A SHELF', directories, true);
-  addLibraryShelf('TAPES · SELECT ONE OR MORE', files);
+  if (libraryCollection) {
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'library-folder-button';
+    back.textContent = 'BACK TO YOUR TAPES';
+    back.addEventListener('click', () => {
+      libraryCollection = null;
+      librarySearch.value = '';
+      renderLibrary();
+      libraryShelves.querySelector('button')?.focus();
+    });
+    libraryShelves.append(back);
+    addLibraryShelf('PICK AN EPISODE', files);
+  } else {
+    addLibraryShelf('MORE ON THE SHELF', directories, true);
+    const { collections, singles } = groupLibraryTapes(files);
+    if (collections.length) {
+      const section = document.createElement('section');
+      section.className = 'library-shelf';
+      const heading = document.createElement('h3');
+      heading.textContent = 'FAVOURITE SHOWS';
+      const row = document.createElement('div');
+      row.className = 'library-shelf-row';
+      for (const collection of collections) {
+        row.append(makeLibraryCard(collection.items[0], false, collection));
+      }
+      section.append(heading, row);
+      libraryShelves.append(section);
+    }
+    addLibraryShelf('PICK SOMETHING TO WATCH', singles);
+  }
   if (!directories.length && !files.length) {
     libraryEmpty(query ? 'NO MATCHING TAPES' : 'NO PLAYABLE TAPES ON THIS SHELF', query ? 'Try another title or clear the search.' : 'Import tapes here, or choose a subfolder to browse.');
   }
@@ -1352,6 +1596,7 @@ async function loadLibraryFolder(folderPath) {
   try {
     const view = await window.tube.browseLibraryFolder(folderPath);
     libraryView = view;
+    libraryCollection = null;
     renderLibrary();
     setStatus(`${view.files.length} LOCAL TAPES INDEXED`);
   } catch (error) {
@@ -1407,6 +1652,7 @@ async function focusManagedTapeShelf(root) {
   }
 }
 async function openLibrary() {
+  if (selectedInput === 'tv') setInputSource('video');
   if (!libraryDialog.open) {
     libraryDialog.showModal();
     pauseFrameLoop();
@@ -1679,7 +1925,7 @@ async function addLibrarySelection() {
   }
 }
 function scheduleFrameLoop() {
-  if (frameLoopRequest === null) frameLoopRequest = requestAnimationFrame(frameLoop);
+  if (pictureVisible && frameLoopRequest === null) frameLoopRequest = requestAnimationFrame(frameLoop);
 }
 function pauseFrameLoop() {
   if (frameLoopRequest === null) return;
@@ -1691,13 +1937,13 @@ function drawIntroPicture(width, height) {
   const centerX = width / 2;
   const centerY = height / 2;
   const glow = Math.max(2, height * 0.012);
-  const titleSize = Math.max(14, Math.min(height * 0.052, width * 0.066));
+  const titleSize = Math.max(20, Math.min(height * 0.085, width * 0.07));
   context.fillStyle = '#020503';
   context.fillRect(0, 0, width, height);
   const vignette = context.createRadialGradient(centerX, centerY * 0.9, height * 0.04, centerX, centerY, height * 0.78);
-  vignette.addColorStop(0, '#102012');
-  vignette.addColorStop(0.58, '#08110a');
-  vignette.addColorStop(1, '#010201');
+  vignette.addColorStop(0, '#0a1a24');
+  vignette.addColorStop(0.58, '#050d14');
+  vignette.addColorStop(1, '#010203');
   context.fillStyle = vignette;
   context.fillRect(0, 0, width, height);
 
@@ -1706,14 +1952,14 @@ function drawIntroPicture(width, height) {
   const iconX = centerX - iconWidth / 2;
   const iconY = centerY - height * 0.155;
   context.save();
-  context.shadowColor = '#a6ee8b';
+  context.shadowColor = '#33d6ff';
   context.shadowBlur = glow * 2.2;
-  context.strokeStyle = '#b5e999';
+  context.strokeStyle = '#bdf3ff';
   context.lineWidth = Math.max(2, height * 0.005);
   context.beginPath();
   context.roundRect(iconX, iconY, iconWidth, iconHeight, Math.max(3, iconHeight * 0.22));
   context.stroke();
-  context.fillStyle = '#e3ffd5';
+  context.fillStyle = '#e6fbff';
   context.beginPath();
   context.moveTo(centerX - iconWidth * 0.09, iconY + iconHeight * 0.25);
   context.lineTo(centerX + iconWidth * 0.16, iconY + iconHeight * 0.5);
@@ -1725,78 +1971,242 @@ function drawIntroPicture(width, height) {
   context.save();
   context.textAlign = 'center';
   context.textBaseline = 'middle';
-  context.font = `700 ${titleSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  context.shadowColor = '#c9efb7';
+  context.font = `${titleSize}px ${OSD_CANVAS_FONT}`;
+  context.shadowColor = '#33d6ff';
   context.shadowBlur = glow;
-  context.fillStyle = '#ecf7e1';
+  context.fillStyle = '#e6fbff';
   context.fillText('A LITTLE SATURDAY MAGIC', centerX, centerY + height * 0.015, width * 0.84);
   context.shadowBlur = Math.max(1, glow * 0.35);
-  context.font = `500 ${Math.max(9, titleSize * 0.42)}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  context.fillStyle = '#c0d0b7';
+  context.font = `${Math.max(14, titleSize * 0.5)}px ${OSD_CANVAS_FONT}`;
+  context.fillStyle = '#b8dceb';
   if (selectedInput !== 'tv' && tvSet.dataset.input !== 'tv') {
-    context.fillText('Open the tape shelf from the VHS loader at right', centerX, centerY + height * 0.09, width * 0.88);
+    context.fillText('Open the tape shelf from the VHS loader below', centerX, centerY + height * 0.09, width * 0.88);
   }
   context.restore();
 }
-function drawCornerOverlayText(text, side, width, height) {
-  const fontSize = Math.max(18, Math.round(height * 0.055));
-  const inset = Math.round(width * 0.10);
-  const textTop = Math.round(height * 0.15);
-  compositeContext.save();
-  compositeContext.font = `700 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-  compositeContext.textBaseline = 'alphabetic';
-  const measured = compositeContext.measureText(text);
-  const baselineY = textTop + measured.actualBoundingBoxAscent;
-  const textX = side === 'right' ? width - inset - measured.width : inset;
-  compositeContext.shadowColor = '#e9f4d8cc';
-  compositeContext.shadowBlur = Math.max(2, height * 0.008);
-  compositeContext.fillStyle = '#f3f5e8';
-  compositeContext.fillText(text, textX, baselineY);
-  compositeContext.restore();
-  return { fontSize, textX, baselineY, measured };
+// On-screen display: drawn into its own layer that the CRT shader blends in after the VHS tracking jitter, so the lettering
+// curves, blurs, glows and picks up scanlines with the tube while staying steady on a bad tape. Everything is laid out inside
+// the tube, independent of the video's letterboxing, well clear of the curved glass. The DOM overlays stay for screen readers.
+const osdCanvas = document.createElement('canvas');
+const osdContext = osdCanvas.getContext('2d');
+let osdTexture = null;
+let osdTextureWidth = 0;
+let osdTextureHeight = 0;
+let osdLayerVisible = false;
+let channelSurfShownAt = 0;
+let channelSurfHoldMs = 1900;
+const OSD_INK = '#e6fbff';
+const OSD_GLOW = '#33d6ff';
+function osdSafeRect(width, height) {
+  // Keep the readout anchored to the tube with a margin for the curved glass.
+  return { x: width * 0.12, y: height * 0.12, width: width * 0.76, height: height * 0.76, unit: height };
 }
-function drawPauseOverlay(width, height) {
-  const { fontSize, textX, baselineY, measured } = drawCornerOverlayText('PAUSE', 'left', width, height);
-  const gap = Math.max(3, Math.round(fontSize * 0.18));
-  const barWidth = Math.max(3, Math.round(fontSize * 0.16));
-  const barsX = textX + measured.width + gap;
-  const barsY = baselineY - measured.actualBoundingBoxAscent;
-  const barsHeight = Math.max(1, Math.ceil(measured.actualBoundingBoxAscent + measured.actualBoundingBoxDescent));
-  compositeContext.save();
-  compositeContext.shadowColor = '#e9f4d8cc';
-  compositeContext.shadowBlur = Math.max(2, height * 0.008);
-  compositeContext.fillStyle = '#f3f5e8';
-  compositeContext.fillRect(barsX, barsY, barWidth, barsHeight);
-  compositeContext.fillRect(barsX + barWidth + Math.max(2, Math.round(barWidth * 0.7)), barsY, barWidth, barsHeight);
-  compositeContext.restore();
+function osdFont(size) { return `${Math.round(size)}px ${OSD_CANVAS_FONT}`; }
+function fitOsdFont(context, text, size, maxWidth) {
+  context.font = osdFont(size);
+  const measured = context.measureText(text).width;
+  if (measured > maxWidth) { size *= maxWidth / measured; context.font = osdFont(size); }
+  return size;
 }
-function drawFileExtensionOverlay(extension, width, height) {
-  drawCornerOverlayText(extension, 'right', width, height);
+function withOsdGlow(context, size, draw) {
+  context.save();
+  context.fillStyle = OSD_INK;
+  context.shadowColor = OSD_GLOW;
+  context.shadowBlur = Math.max(3, size * 0.16);
+  draw();
+  context.shadowColor = '#ffffff';
+  context.shadowBlur = Math.max(1, size * 0.04);
+  draw();
+  context.restore();
+}
+function drawOsdText(context, text, x, y, size, align = 'left', baseline = 'alphabetic') {
+  withOsdGlow(context, size, () => {
+    context.font = osdFont(size);
+    context.textAlign = align;
+    context.textBaseline = baseline;
+    context.letterSpacing = `${Math.round(size * 0.06)}px`;
+    context.fillText(text, x, y);
+  });
+}
+function drawOsdPause(context, safe) {
+  let size = safe.unit * 0.085;
+  size = fitOsdFont(context, 'PAUSE', size, safe.width * 0.4);
+  const x = safe.x + safe.width * 0.06;
+  const y = safe.y + safe.height * 0.08 + size * 0.8;
+  drawOsdText(context, 'PAUSE', x, y, size);
+  context.font = osdFont(size);
+  context.letterSpacing = `${Math.round(size * 0.06)}px`;
+  const textWidth = context.measureText('PAUSE').width;
+  const barWidth = Math.max(3, size * 0.16);
+  const barHeight = size * 0.72;
+  const barsX = x + textWidth + size * 0.18;
+  withOsdGlow(context, size, () => {
+    context.fillRect(barsX, y - barHeight, barWidth, barHeight);
+    context.fillRect(barsX + barWidth * 1.7, y - barHeight, barWidth, barHeight);
+  });
+}
+function drawOsdChannel(context, safe, now) {
+  const elapsed = now - channelSurfShownAt;
+  const progress = channelSurfHoldMs > 0 ? elapsed / channelSurfHoldMs : 1;
+  if (progress >= 1) return;
+  const opacity = progress < 0.12 ? progress / 0.12 : progress > 0.78 ? (1 - progress) / 0.22 : 1;
+  const text = channelSurfOverlay.textContent || '';
+  let size = safe.unit * 0.12;
+  context.save();
+  context.letterSpacing = `${Math.round(size * 0.06)}px`;
+  size = fitOsdFont(context, text, size, safe.width * 0.8);
+  context.globalAlpha = Math.max(0, Math.min(1, opacity));
+  drawOsdText(context, text, safe.x + safe.width * 0.97, safe.y + safe.height * 0.04 + size * 0.8, size, 'right');
+  context.restore();
+}
+function drawOsdVolume(context, safe) {
+  const level = Math.max(0, Math.min(100, Math.round(dialValue(videoDial))));
+  const size = safe.unit * 0.085;
+  const centerX = safe.x + safe.width / 2;
+  const valueY = safe.y + safe.height * 0.97;
+  const trackY = valueY - size * 0.95;
+  const labelY = trackY - size * 0.95;
+  drawOsdText(context, 'VOLUME', centerX, labelY, size, 'center');
+  const barWidth = Math.min(safe.width * 0.62, size * 12);
+  const barX = centerX - barWidth / 2;
+  drawOsdText(context, '<', barX - size * 0.3, trackY, size * 1.1, 'right');
+  drawOsdText(context, '>', barX + barWidth + size * 0.3, trackY, size * 1.1, 'left');
+  const ticks = 40;
+  const lit = Math.round(level * 0.4);
+  const tickWidth = Math.max(2, size * 0.1);
+  withOsdGlow(context, size * 0.6, () => {
+    for (let index = 0; index < ticks; index += 1) {
+      const x = barX + (barWidth - tickWidth) * index / (ticks - 1);
+      const on = index < lit;
+      const tickHeight = on ? size * 0.16 : size * 0.1;
+      context.globalAlpha = on ? 1 : 0.5;
+      context.fillRect(x, trackY - size * 0.12 - tickHeight, tickWidth, tickHeight);
+    }
+    context.globalAlpha = 1;
+    context.fillRect(barX + barWidth * level / 100 - size * 0.045, trackY - size * 0.74, size * 0.09, size * 0.62);
+  });
+  drawOsdText(context, String(level), centerX, valueY, size * 0.62, 'center');
+}
+function drawOsdMute(context, safe) {
+  const size = safe.unit * 0.085;
+  drawOsdText(context, 'MUTE', safe.x + safe.width * 0.1, safe.y + safe.height * 0.9, size);
+}
+function drawOsdSearching(context, safe, now) {
+  if (Math.floor(now / 500) % 2) return;
+  let size = safe.unit * 0.07;
+  const text = channelLoadingStatus();
+  const indicator = document.querySelector('#searchingIndicator');
+  if (indicator && indicator.textContent !== text) indicator.textContent = text;
+  context.save();
+  context.letterSpacing = `${Math.round(size * 0.06)}px`;
+  size = fitOsdFont(context, text, size, safe.width * 0.7);
+  context.font = osdFont(size);
+  const textWidth = context.measureText(text).width;
+  context.restore();
+  const dot = size * 0.36;
+  const gap = dot * 3.2;
+  const total = gap + textWidth;
+  const startX = safe.x + (safe.width - total) / 2;
+  const centerY = safe.y + safe.height / 2;
+  withOsdGlow(context, size, () => {
+    context.beginPath();
+    context.arc(startX + dot / 2, centerY, dot / 2, 0, Math.PI * 2);
+    context.fill();
+  });
+  drawOsdText(context, text, startX + gap, centerY, size, 'left', 'middle');
+}
+function wrapOsdLines(context, text, maxWidth) {
+  const lines = [];
+  for (const paragraph of String(text).split('\n')) {
+    let line = '';
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && context.measureText(next).width > maxWidth) { lines.push(line); line = word; } else line = next;
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+function drawOsdCaption(context, safe) {
+  const text = caption.textContent.trim();
+  if (!text) return;
+  const size = safe.unit * 0.052;
+  context.save();
+  context.font = `700 ${Math.round(size)}px system-ui, sans-serif`;
+  const lines = wrapOsdLines(context, text, safe.width * 0.9).slice(-3);
+  const lineHeight = size * 1.3;
+  const boxWidth = Math.min(safe.width, Math.max(...lines.map(line => context.measureText(line).width)) + size * 0.8);
+  const boxHeight = lines.length * lineHeight + size * 0.2;
+  const boxX = safe.x + (safe.width - boxWidth) / 2;
+  const boxY = safe.y + safe.height - boxHeight;
+  context.fillStyle = 'rgba(0,0,0,0.66)';
+  context.beginPath();
+  context.roundRect(boxX, boxY, boxWidth, boxHeight, size * 0.15);
+  context.fill();
+  context.fillStyle = '#ffffff';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.shadowColor = '#000';
+  context.shadowBlur = size * 0.15;
+  lines.forEach((line, index) => context.fillText(line, boxX + boxWidth / 2, boxY + size * 0.1 + lineHeight * (index + 0.5)));
+  context.restore();
+}
+function drawOsdLayer(width, height, now, paused) {
+  if (osdCanvas.width !== width || osdCanvas.height !== height) { osdCanvas.width = width; osdCanvas.height = height; }
+  const searching = !document.querySelector('#searchingIndicator')?.hidden;
+  const surfing = channelSurfOverlay && !channelSurfOverlay.hidden;
+  const volume = volumeOverlay && !volumeOverlay.hidden;
+  const muted = muteOverlay && !muteOverlay.hidden;
+  const captioned = Boolean(caption.textContent.trim());
+  const preparation = channelPreparationStatus();
+  const visible = paused || searching || surfing || volume || muted || captioned || Boolean(preparation);
+  if (!visible && !osdLayerVisible) return false;
+  osdContext.clearRect(0, 0, width, height);
+  if (visible) {
+    const safe = osdSafeRect(width, height);
+    if (captioned) drawOsdCaption(osdContext, safe);
+    if (paused) drawOsdPause(osdContext, safe);
+    if (surfing) drawOsdChannel(osdContext, safe, now);
+    if (searching) drawOsdSearching(osdContext, safe, now);
+    if (preparation) drawOsdText(osdContext, preparation, safe.x + safe.width / 2, safe.y + safe.height * 0.035, safe.unit * 0.032, 'center');
+    if (volume) drawOsdVolume(osdContext, safe);
+    else if (muted) drawOsdMute(osdContext, safe);
+  }
+  osdLayerVisible = visible;
+  return true;
 }
 function frameLoop(now) {
   frameLoopRequest = null;
-  if (libraryDialog.open) return;
+  if (!pictureVisible || libraryDialog.open) return;
   scheduleFrameLoop();
+  if (now - lastPictureFrame < 1000 / 60 - 0.5) return;
+  lastPictureFrame = now;
+  updateChannelBreakFade();
+  syncSettingsScreenStyle();
   if (!compositeContext) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const outputCanvas = pictureFallback || glContextLost || !gl || !glProgram ? compositeCanvas : canvas;
-  const width = Math.max(1, Math.floor(outputCanvas.clientWidth * dpr));
-  const height = Math.max(1, Math.floor(outputCanvas.clientHeight * dpr));
-  const source = selectedInput === 'static' || transitionStatic
-    ? (staticPicture.readyState >= 2 ? staticPicture : null)
-    : (hasVideo && video.readyState >= 2 ? video : null);
-  const sourceKey = source || `intro-${tvSet.dataset.input || selectedInput}`;
-  const sourceTime = source ? source.currentTime : 0;
-  const sourceWidth = source?.videoWidth || 0;
-  const sourceHeight = source?.videoHeight || 0;
+  const { width, height } = pictureRenderSize(outputCanvas.clientWidth * dpr, outputCanvas.clientHeight * dpr);
+  const tuning = selectedInput === 'tv' && tvSearching && !startupIntroActive;
+  const source = tuning ? null : selectedInput === 'aux'
+    ? window.SaturdayGenesisAux?.canvas
+    : selectedInput === 'static' || transitionStatic
+      ? (staticPicture.readyState >= 2 ? staticPicture : null)
+      : (hasVideo && video.readyState >= 2 ? video : null);
+  const sourceKey = source || (tuning ? 'channel-loading' : `intro-${tvSet.dataset.input || selectedInput}`);
+  const sourceTime = selectedInput === 'aux' ? (window.SaturdayGenesisAux?.frameNumber || 0) : source ? source.currentTime : tuning ? Math.floor(now / 100) : 0;
+  const sourceWidth = source?.videoWidth || source?.width || 0;
+  const sourceHeight = source?.videoHeight || source?.height || 0;
   const paused = selectedInput === 'video' && hasVideo && video.paused && !video.ended && !shuttingOff && !transitionStatic;
-  const extension = visibleFileExtension;
   const dimensionsChanged = compositeCanvas.width !== width || compositeCanvas.height !== height;
   if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
   if (dimensionsChanged) { compositeCanvas.width = width; compositeCanvas.height = height; }
-  const holdLastTVFrame = selectedInput === 'tv' && !source && lastCompositeHasFrame && !dimensionsChanged;
+  const holdLastTVFrame = selectedInput === 'tv' && !tuning && !source && lastCompositeHasFrame && !dimensionsChanged;
+  const useFallback = pictureFallback || glContextLost || !gl || !glProgram;
+  const osdChanged = drawOsdLayer(width, height, now, paused);
+  // Without WebGL the on-screen display is painted straight onto the 2D picture, so it needs a fresh frame underneath.
   const frameChanged = !holdLastTVFrame && (sourceKey !== lastRenderedSource || sourceTime !== lastUploadedTime
-    || paused !== lastCompositePaused || extension !== lastRenderedExtension || dimensionsChanged);
+    || paused !== lastCompositePaused || dimensionsChanged) || (useFallback && osdChanged);
   if (frameChanged) {
     compositeContext.fillStyle = '#070908';
     compositeContext.fillRect(0, 0, width, height);
@@ -1809,18 +2219,21 @@ function frameLoop(now) {
       else { viewWidth = Math.round(height * mediaAspect); x = Math.floor((width - viewWidth) / 2); }
       compositeContext.drawImage(source, x, y, viewWidth, viewHeight);
       hasPicture = true;
+    } else if (tuning) {
+      drawChannelLoadingPicture(width, height, now);
     } else if (selectedInput !== 'tv' || startupIntroActive) {
       drawIntroPicture(width, height);
     }
-    if (extension && hasPicture) drawFileExtensionOverlay(extension, width, height);
-    if (paused) drawPauseOverlay(width, height);
+    if (useFallback && osdLayerVisible) compositeContext.drawImage(osdCanvas, 0, 0);
     lastRenderedSource = sourceKey;
-    lastRenderedExtension = extension;
     lastUploadedTime = sourceTime;
     lastCompositePaused = paused;
     lastCompositeHasFrame = hasPicture;
   }
-  if (pictureFallback || glContextLost || !gl || !glProgram) return;
+  if (useFallback) {
+    if (window.SaturdayScenes.active) window.SaturdayScenes.updateGlow(compositeCanvas, now, roomLightSample);
+    return;
+  }
   gl.viewport(0, 0, width, height);
   gl.clearColor(0.025, 0.03, 0.025, 1.0);
   gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1846,7 +2259,23 @@ function frameLoop(now) {
     console.error('CRT frame upload failed; using the 2D picture fallback', error);
     return;
   }
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, osdTexture);
+  if (osdChanged) {
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    if (osdTextureWidth !== width || osdTextureHeight !== height) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, osdCanvas);
+      osdTextureWidth = width;
+      osdTextureHeight = height;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, osdCanvas);
+    }
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  }
+  gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(gl.getUniformLocation(glProgram, 'frame'), 0);
+  gl.uniform1i(gl.getUniformLocation(glProgram, 'osd'), 1);
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'osdOn'), osdLayerVisible && osdTextureWidth === width && osdTextureHeight === height ? 1 : 0);
   gl.uniform2f(gl.getUniformLocation(glProgram, 'resolution'), width, height);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'time'), now / 1000);
   const isCRT = pictureFiltersEnabled && displayMode === 'crt';
@@ -1856,16 +2285,339 @@ function frameLoop(now) {
   gl.uniform1f(gl.getUniformLocation(glProgram, 'scan'), isCRT ? dialValue(scanlineDial) / 100 : 0.0);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'edgeBlur'), tvScale * dialValue(edgeBlurDial) / 100);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'hueShift'), videoScale * dialValue(hueDial) / 100 + (1 - videoScale) * 0.5);
-  gl.uniform1f(gl.getUniformLocation(glProgram, 'vhsScan'), videoScale * dialValue(vhsScanDial) / 100);
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'vhsScan'), playingAuthenticTape ? 0 : videoScale * dialValue(vhsScanDial) / 100);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'glitch'), videoScale * dialValue(glitchDial) / 100);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'broken'), videoScale * dialValue(brokenTapeDial) / 100);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'glow'), tvScale * dialValue(glowDial) / 100);
-  gl.uniform1f(gl.getUniformLocation(glProgram, 'glare'), tvScale * dialValue(glareDial) / 100);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'pictureMode'), videoScale ? ({ color: 0, lowstim: 1, bw: 2 }[selectedPictureMode] || 0) : 0);
   gl.uniform1f(gl.getUniformLocation(glProgram, 'rearProjection'), pictureFiltersEnabled && displayMode === 'rear' ? 1 : 0);
+  // Edge shading follows the curve dial and the slight colour fringe exists only with filters on; bypass is the raw frame.
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'vignette'), isCRT ? dialValue(curveDial) / 100 : 0.0);
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'chroma'), tvScale);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
+  if (window.SaturdayScenes.active) window.SaturdayScenes.updateGlow(compositeCanvas, now, roomLightSample);
 }
 
+// The settings menu is HTML over the tube, so the shader's look is mirrored onto it with CSS, and onto the room light sample.
+// BRIGHTNESS is the set's backlight: 50% is neutral; it scales the picture and, past 50%, lifts the blacks like a real tube.
+function tvBacklight(value) {
+  const level = Math.max(0, Math.min(100, value)) / 100;
+  return { gain: 0.55 + level * 0.9, contrast: 1 - Math.max(0, level - 0.5) * 0.16 };
+}
+function applyTvBacklight(value) {
+  const backlight = tvBacklight(value);
+  document.documentElement.style.setProperty('--tv-backlight', backlight.gain.toFixed(3));
+  document.documentElement.style.setProperty('--tv-black-lift', backlight.contrast.toFixed(3));
+}
+function pictureLook() {
+  const backlight = tvBacklight(dialValue(brightnessDial));
+  if (!pictureFiltersEnabled) return { mode: 'color', hue: 0.5, rear: false, curve: 0, scan: 0, glow: 0, backlight };
+  const crt = displayMode === 'crt';
+  return {
+    backlight,
+    mode: ['lowstim', 'bw'].includes(selectedPictureMode) ? selectedPictureMode : 'color',
+    hue: dialValue(hueDial) / 100,
+    rear: displayMode === 'rear',
+    curve: crt ? dialValue(curveDial) / 100 : 0,
+    scan: crt ? dialValue(scanlineDial) / 100 : 0,
+    glow: dialValue(glowDial) / 100
+  };
+}
+function settingsScreenStyle(look) {
+  const filters = [];
+  if (look.curve > 0.001) filters.push('url(#settingsScreenCurve)');
+  const degrees = Math.round((look.hue - 0.5) * 360);
+  if (degrees) filters.push(`hue-rotate(${degrees}deg)`);
+  if (look.mode === 'bw') filters.push('grayscale(1)');
+  else if (look.mode === 'lowstim') filters.push('saturate(0.32)', 'sepia(0.16)', 'contrast(0.82)');
+  if (look.rear) filters.push('brightness(0.9)', 'contrast(0.96)', 'blur(0.35px)');
+  if (look.glow > 0.02) filters.push(`brightness(${(1 + Math.min(2, look.glow) * 0.06).toFixed(3)})`,
+    `drop-shadow(0 0 ${(Math.min(2, look.glow) * 9).toFixed(1)}px rgb(150 190 255 / ${Math.min(0.75, look.glow * 0.45).toFixed(3)}))`);
+  return {
+    filter: filters.join(' ') || 'brightness(1)',
+    curve: (look.curve * 0.075 * 2).toFixed(4),
+    scan: look.scan.toFixed(3),
+    vignette: look.curve.toFixed(3)
+  };
+}
+function applyPictureLook(data, look) {
+  const angle = (look.hue - 0.5) * Math.PI * 2;
+  const c = Math.cos(angle), s = Math.sin(angle);
+  // The shader's hueTurn matrix (column-major there, written out row by row here).
+  const m = [0.213 + 0.787 * c - 0.213 * s, 0.715 - 0.715 * c - 0.715 * s, 0.072 - 0.072 * c + 0.928 * s,
+    0.213 - 0.213 * c + 0.143 * s, 0.715 + 0.285 * c + 0.140 * s, 0.072 - 0.072 * c - 0.283 * s,
+    0.213 - 0.213 * c - 0.787 * s, 0.715 - 0.715 * c + 0.715 * s, 0.072 + 0.928 * c + 0.072 * s];
+  for (let index = 0; index < data.length; index += 4) {
+    const r0 = data[index] / 255, g0 = data[index + 1] / 255, b0 = data[index + 2] / 255;
+    let r = m[0] * r0 + m[1] * g0 + m[2] * b0;
+    let g = m[3] * r0 + m[4] * g0 + m[5] * b0;
+    let b = m[6] * r0 + m[7] * g0 + m[8] * b0;
+    const luma = r * 0.299 + g * 0.587 + b * 0.114;
+    if (look.mode === 'bw') r = g = b = luma;
+    else if (look.mode === 'lowstim') {
+      r = ((r + (luma * 1.04 - r) * 0.68) - 0.5) * 0.82 + 0.5;
+      g = ((g + (luma * 1.01 - g) * 0.68) - 0.5) * 0.82 + 0.5;
+      b = ((b + (luma * 0.94 - b) * 0.68) - 0.5) * 0.82 + 0.5;
+    }
+    if (look.rear) { r = r * 0.88 + 0.035; g = g * 0.88 + 0.03; b = b * 0.88 + 0.024; }
+    // Same order as the CSS backlight filter: brightness(gain) then contrast(lift).
+    const { gain, contrast } = look.backlight || { gain: 1, contrast: 1 };
+    r = (r * gain - 0.5) * contrast + 0.5; g = (g * gain - 0.5) * contrast + 0.5; b = (b * gain - 0.5) * contrast + 0.5;
+    data[index] = Math.round(Math.max(0, Math.min(1, r)) * 255);
+    data[index + 1] = Math.round(Math.max(0, Math.min(1, g)) * 255);
+    data[index + 2] = Math.round(Math.max(0, Math.min(1, b)) * 255);
+  }
+  return data;
+}
+const SETTINGS_MENU_LIGHT = '22 58 196';
+function roomLightSample() {
+  const look = pictureLook();
+  const sample = { adjust: data => applyPictureLook(data, look) };
+  if (!tvSettingsDialog.open) return sample;
+  const screen = canvas.getBoundingClientRect();
+  const menu = tvSettingsDialog.getBoundingClientRect();
+  if (!screen.width || !screen.height) return sample;
+  sample.color = SETTINGS_MENU_LIGHT;
+  sample.rect = {
+    x: (menu.left - screen.left) / screen.width, y: (menu.top - screen.top) / screen.height,
+    width: menu.width / screen.width, height: menu.height / screen.height
+  };
+  return sample;
+}
+let settingsScreenStyleKey = '';
+function syncSettingsScreenStyle() {
+  if (!tvSettingsDialog.open) { settingsScreenStyleKey = ''; return; }
+  const style = settingsScreenStyle(pictureLook());
+  const key = JSON.stringify(style);
+  if (key === settingsScreenStyleKey) return;
+  settingsScreenStyleKey = key;
+  tvSettingsDialog.style.setProperty('--settings-screen-filter', style.filter);
+  tvSettingsDialog.style.setProperty('--settings-scan', style.scan);
+  tvSettingsDialog.style.setProperty('--settings-vignette', style.vignette);
+  settingsScreenCurve?.setAttribute('scale', style.curve);
+}
+// Barrel map for the menu, matching the shader's q *= 1 + strength * r2 (R/G encode the x/y source offset).
+const settingsScreenCurve = (() => {
+  const size = 128;
+  const map = document.createElement('canvas');
+  map.width = map.height = size;
+  const context = map.getContext('2d');
+  if (!context) return null;
+  const pixels = context.createImageData(size, size);
+  for (let y = 0; y < size; y += 1) for (let x = 0; x < size; x += 1) {
+    const qx = (x + 0.5) / size * 2 - 1, qy = (y + 0.5) / size * 2 - 1;
+    const r2 = qx * qx + qy * qy;
+    const index = (y * size + x) * 4;
+    pixels.data[index] = Math.round((0.5 + qx * r2 / 4) * 255);
+    pixels.data[index + 1] = Math.round((0.5 + qy * r2 / 4) * 255);
+    pixels.data[index + 3] = 255;
+  }
+  context.putImageData(pixels, 0, 0);
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('style', 'position:absolute;width:0;height:0;overflow:hidden');
+  const filter = document.createElementNS(ns, 'filter');
+  for (const [name, value] of Object.entries({ id: 'settingsScreenCurve', x: '0', y: '0', width: '1', height: '1',
+    filterUnits: 'objectBoundingBox', primitiveUnits: 'objectBoundingBox', 'color-interpolation-filters': 'sRGB' })) filter.setAttribute(name, value);
+  const image = document.createElementNS(ns, 'feImage');
+  for (const [name, value] of Object.entries({ href: map.toDataURL('image/png'), x: '0', y: '0', width: '1', height: '1', preserveAspectRatio: 'none', result: 'barrel' })) image.setAttribute(name, value);
+  const displace = document.createElementNS(ns, 'feDisplacementMap');
+  for (const [name, value] of Object.entries({ in: 'SourceGraphic', in2: 'barrel', scale: '0', xChannelSelector: 'R', yChannelSelector: 'G' })) displace.setAttribute(name, value);
+  filter.append(image, displace);
+  svg.append(filter);
+  document.body.append(svg);
+  return displace;
+})();
+
+function pictureRenderSize(width, height) {
+  const scale = Math.min(1, 1920 / Math.max(width, height), Math.sqrt(1920 * 1080 / Math.max(1, width * height)));
+  return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) };
+}
+
+const CHANNEL_BREAK_FADE_SECONDS = 0.45;
+const CHANNEL_BREAK_REFINE_HORIZON_SECONDS = 3 * 60 * 60;
+const CHANNEL_BREAK_MIN_SEGMENT_SECONDS = 120;
+const CHANNEL_BREAK_KINDS = new Set(['black', 'silence', 'lull', 'nominal']);
+const CHANNEL_BREAK_CUT_VERSION = 2;
+const CHANNEL_MIN_MIDROLL_PROGRAM_SECONDS = 8 * 60;
+// The broadcast clock waits for the picture: a segment that loaded or buffered a little late still plays to its end.
+const CHANNEL_CLOCK_HOLD_MAX_SECONDS = 10;
+function playbackSourceTime() {
+  return (livePlayback ? livePlayback.baseSeconds : 0) + (Number(video.currentTime) || 0);
+}
+function playbackSourceDuration() {
+  return livePlayback ? NaN : video.duration;
+}
+function shiftBroadcastClock(channel, seconds) {
+  const broadcast = channel?.broadcast;
+  if (!broadcast || channel.restorePending || !Number.isFinite(seconds) || !seconds) return;
+  const offset = Number(broadcast.initialOffsetSeconds) || 0;
+  if (offset + seconds >= 0) broadcast.initialOffsetSeconds = offset + seconds;
+  else broadcast.startedAtMs -= seconds * 1000;
+}
+function channelPlaybackOnAir(channel) {
+  return hasVideo && !video.paused && !video.seeking && video.readyState >= 2 && selectedInput === 'tv'
+    && activePlaybackChannelId === channel?.id && channel.queue?.[currentIndex]?.path === activePlaybackPath;
+}
+// When the clock has moved past the segment still on screen, it is wound back to the picture. Returns true while that
+// segment (an ad always to its last frame) is still playing, so the next one starts at its first frame, never part-way in.
+function holdBroadcastForPlayingSegment(channel, position) {
+  if (!position || currentIndex >= position.index || !channelPlaybackOnAir(channel)) return false;
+  const current = channel.queue[currentIndex];
+  const sourceStart = Number(current.sourceStartSeconds) || 0;
+  const scheduledEnd = sourceStart + (Number(current.durationSeconds) || 0);
+  let end = scheduledEnd;
+  if (current.segmentType === 'commercial' && Number.isFinite(playbackSourceDuration())) {
+    end = Math.max(end, Math.min(playbackSourceDuration(), scheduledEnd + CHANNEL_CLOCK_HOLD_MAX_SECONDS));
+  }
+  const remaining = end - playbackSourceTime();
+  let currentStartClock = 0;
+  for (let index = 0; index < currentIndex; index += 1) currentStartClock += Number(channel.queue[index]?.durationSeconds) || 0;
+  const currentEndClock = currentStartClock + (Number(current.durationSeconds) || 0);
+  const holding = remaining > 0.05;
+  const pictureClock = Math.min(currentStartClock + Math.max(0, playbackSourceTime() - sourceStart), currentEndClock - (holding ? 0.001 : 0));
+  const lag = position.startSeconds + position.offsetSeconds - pictureClock;
+  if (!(lag > 0) || lag > CHANNEL_CLOCK_HOLD_MAX_SECONDS) return false;
+  shiftBroadcastClock(channel, -lag);
+  return holding;
+}
+function channelBreakFadeTarget() {
+  if (selectedInput !== 'tv' || !hasVideo || transitionStatic) return 1;
+  const channel = activeChannel();
+  const segment = channel?.queue?.[currentIndex];
+  if (!segment || segment.segmentType !== 'program' || activePlaybackPath !== segment.path || !Number.isFinite(video.currentTime)) return 1;
+  const start = Number(segment.sourceStartSeconds) || 0;
+  const end = start + (Number(segment.durationSeconds) || 0);
+  const mediaEnd = Number(segment.mediaDurationSeconds) || Infinity;
+  let level = 1;
+  // Breaks cut on a fade to black need no help; any other mid-programme cut dips quickly to black and back.
+  if (channel.queue[currentIndex + 1]?.segmentType === 'commercial' && end < mediaEnd - 1 && segment.endCutKind !== 'black') {
+    level = Math.min(level, (end - playbackSourceTime()) / CHANNEL_BREAK_FADE_SECONDS);
+  }
+  if (start > 1 && channel.queue[currentIndex - 1]?.segmentType !== 'program' && segment.startCutKind !== 'black') {
+    level = Math.min(level, (playbackSourceTime() - start) / CHANNEL_BREAK_FADE_SECONDS);
+  }
+  return Math.min(1, Math.max(0, level));
+}
+function updateChannelBreakFade() {
+  const level = channelBreakFadeTarget();
+  if (Math.abs(level - channelBreakFadeLevel) > 0.004) {
+    channelBreakFadeLevel = level;
+    breakFadeOverlay.style.opacity = String(1 - level);
+    setMasterVolume(true);
+  }
+  maybeCutToChannelBreak();
+}
+// The broadcast clock is polled twice a second; cut on the frame the programme reaches its break so nothing past the cut leaks out.
+function maybeCutToChannelBreak() {
+  if (selectedInput !== 'tv' || !hasVideo || video.paused) return;
+  const channel = activeChannel();
+  const segment = channel?.queue?.[currentIndex];
+  if (!channel?.broadcast || segment?.segmentType !== 'program' || channel.queue[currentIndex + 1]?.segmentType !== 'commercial'
+    || activePlaybackPath !== segment.path || channelBreakAdvanceSequence === segment.sequence) return;
+  const end = (Number(segment.sourceStartSeconds) || 0) + (Number(segment.durationSeconds) || 0);
+  if (playbackSourceTime() < end - 0.03) return;
+  const position = locateChannelSegment(channel, broadcastElapsed(channel));
+  if (!position || position.index !== currentIndex) return;
+  const remaining = Math.max(0, position.segment.durationSeconds - position.offsetSeconds);
+  if (remaining > 1.5) return;
+  channelBreakAdvanceSequence = segment.sequence;
+  channel.broadcast.startedAtMs -= remaining * 1000;
+  syncActiveBroadcast(true);
+}
+function channelBreakBoundaries(channel) {
+  const elapsed = broadcastElapsed(channel);
+  const position = locateChannelSegment(channel, elapsed);
+  if (!position) return [];
+  const boundaries = [];
+  let startSeconds = position.startSeconds;
+  for (let index = position.index; index < channel.queue.length; index += 1) {
+    const before = channel.queue[index];
+    const beforeStart = startSeconds;
+    startSeconds += Number(before.durationSeconds) || 0;
+    if (beforeStart - elapsed > CHANNEL_BREAK_REFINE_HORIZON_SECONDS) break;
+    if (before.segmentType !== 'program' || channel.queue[index + 1]?.segmentType !== 'commercial') continue;
+    let afterIndex = index + 1;
+    while (channel.queue[afterIndex]?.segmentType === 'commercial') afterIndex += 1;
+    const after = channel.queue[afterIndex];
+    if (!after || after.segmentType !== 'program' || after.path !== before.path || Number(after.cutVersion) === CHANNEL_BREAK_CUT_VERSION) continue;
+    const beforeEnd = (Number(before.sourceStartSeconds) || 0) + (Number(before.durationSeconds) || 0);
+    if (Math.abs((Number(after.sourceStartSeconds) || 0) - beforeEnd) > 0.5) continue;
+    let minSeconds = (Number(before.sourceStartSeconds) || 0) + CHANNEL_BREAK_MIN_SEGMENT_SECONDS;
+    if (index === position.index) {
+      // The playing segment's cut can still move, but only to a point comfortably ahead of the picture.
+      const playingSeconds = (Number(before.sourceStartSeconds) || 0) + position.offsetSeconds;
+      if (beforeEnd - playingSeconds < 20) continue;
+      minSeconds = Math.max(minSeconds, Math.ceil((playingSeconds + 25) / 30) * 30);
+    }
+    boundaries.push({
+      before,
+      after,
+      entry: {
+        path: before.path,
+        size: Number(before.size) || 0,
+        modified: Number(before.modified) || 0,
+        mediaDurationSeconds: Number(before.mediaDurationSeconds) || 0,
+        targetSeconds: Number(after.breakTargetSeconds) > 0 ? Number(after.breakTargetSeconds) : beforeEnd,
+        minSeconds,
+        maxSeconds: beforeEnd + (Number(after.durationSeconds) || 0) - CHANNEL_BREAK_MIN_SEGMENT_SECONDS,
+        secondsUntil: Math.max(0, startSeconds - elapsed),
+        priority: channel.id === activeChannelId
+      }
+    });
+  }
+  return boundaries;
+}
+async function refineChannelBreaks(channel) {
+  if (!channel?.broadcast || !channel.queue?.length || typeof window.tube.resolveChannelBreaks !== 'function') return;
+  if (channel.breakRefinePromise) {
+    channel.breakRefineAgain = true;
+    return channel.breakRefinePromise;
+  }
+  channel.breakRefinePromise = (async () => {
+    do {
+      channel.breakRefineAgain = false;
+      const boundaries = channelBreakBoundaries(channel);
+      if (!boundaries.length) return;
+      const results = await window.tube.resolveChannelBreaks(boundaries.map(boundary => boundary.entry));
+      if (!channels.includes(channel)) return;
+      const position = locateChannelSegment(channel, broadcastElapsed(channel));
+      let changed = false;
+      boundaries.forEach(({ before, after, entry }, index) => {
+        const result = results?.[index];
+        const beforeIndex = channel.queue.indexOf(before);
+        if (!result || !CHANNEL_BREAK_KINDS.has(result.kind) || beforeIndex < 0 || !position || beforeIndex < position.index
+          || channel.queue.indexOf(after) <= beforeIndex) return;
+        const beforeStart = Number(before.sourceStartSeconds) || 0;
+        const oldCut = Number(after.sourceStartSeconds) || 0;
+        const afterEnd = oldCut + (Number(after.durationSeconds) || 0);
+        const cut = Math.min(Math.max(Number(result.seconds), entry.minSeconds), afterEnd - CHANNEL_BREAK_MIN_SEGMENT_SECONDS);
+        if (!Number.isFinite(cut) || cut <= beforeStart || cut >= afterEnd) return;
+        if (beforeIndex === position.index) {
+          const livePosition = locateChannelSegment(channel, broadcastElapsed(channel));
+          if (livePosition?.index !== beforeIndex || cut - (beforeStart + livePosition.offsetSeconds) < 3) return;
+        }
+        // Moving a shared cut lengthens one segment by what it takes from the other, so the schedule after the pair is unchanged.
+        before.durationSeconds = cut - beforeStart;
+        after.sourceStartSeconds = cut;
+        after.durationSeconds = afterEnd - cut;
+        after.breakTargetSeconds = entry.targetSeconds;
+        before.endCutKind = result.kind;
+        after.startCutKind = result.kind;
+        after.cutVersion = CHANNEL_BREAK_CUT_VERSION;
+        changed = true;
+      });
+      if (changed) {
+        channel.broadcast.totalDurationSeconds = channel.queue.reduce((sum, item) => sum + (Number(item.durationSeconds) || 0), 0);
+        persistChannels();
+        if (selectedInput === 'tv' && activeChannelId === channel.id) renderPlaylist();
+      }
+    } while (channel.breakRefineAgain && channels.includes(channel));
+  })().catch(error => console.warn('Channel break points could not be refined', error))
+    .finally(() => { channel.breakRefinePromise = null; });
+  return channel.breakRefinePromise;
+}
 function activeChannel() { return channels.find(item => item.id === activeChannelId) || null; }
 function recordChannelTuneMetric(stage, diagnostic = {}) {
   const metric = activeChannelTuneMetric;
@@ -1925,6 +2677,29 @@ function isCurrentChannelPlayback() {
   return channel?.id === activePlaybackChannelId && activePlaybackTuneToken === channelTuneToken
     && track?.path === activePlaybackPath && channelOwnsPlaybackTrack(channel, track);
 }
+function channelPreparationStatus() {
+  if (selectedInput !== 'tv' || startupIntroActive) return '';
+  const enabled = channels.filter(channel => channel.enabled !== false && !channel.error);
+  const pending = enabled.filter(channel => !channel.scanComplete || channel.scanning || channel.broadcastInitPromise || channel.broadcast?.queuePromise);
+  return pending.length ? `UPDATING CHANNELS ${enabled.length - pending.length}/${enabled.length}` : '';
+}
+function channelLoadingStatus() {
+  const channel = activeChannel();
+  if (!channelsStartupReady) return 'PREPARING CHANNELS...';
+  if (channel?.scanning || (channel && !channel.scanComplete)) return 'READING CHANNEL FILES...';
+  if (channel?.broadcastInitPromise || channel?.broadcast?.queuePromise) return 'BUILDING SCHEDULE...';
+  if (hasVideo && video.readyState >= 2 && !video.seeking) return 'BUFFERING...';
+  return channelLoadPhase;
+}
+function drawChannelLoadingPicture(width, height, now) {
+  const phase = Math.floor(now / 100);
+  const rows = 32;
+  for (let row = 0; row < rows; row += 1) {
+    const level = 10 + Math.abs(Math.sin(row * 12.9898 + phase * 7.233)) * 14;
+    compositeContext.fillStyle = `rgb(${level},${level + 3},${level + 5})`;
+    compositeContext.fillRect(0, Math.floor(row * height / rows), width, Math.ceil(height / rows));
+  }
+}
 function setTVSearching(active, delayMs = 0) {
   if (tvSearchingTimer) window.clearTimeout(tvSearchingTimer);
   tvSearchingTimer = null;
@@ -1945,24 +2720,47 @@ function setTVSearching(active, delayMs = 0) {
   if (indicator) indicator.hidden = !showSearching;
   stage.classList.toggle('tv-loading', showSearching);
 }
+// Screen menus are laid out at a fixed design size, then zoomed up so their lettering reads from across the room.
+const SCREEN_DIALOG_DESIGN = { settings: { width: 520, height: 380 }, guide: { width: 1000, height: 640 } };
 function setScreenDialogBounds(dialog) {
   if (!dialog || !dialog.open) return;
   const stageRect = stage.getBoundingClientRect();
   const compactSettings = dialog === tvSettingsDialog;
-  const anchor = compactSettings
-    ? stageRect
+  const screenAnchored = compactSettings;
+  const design = compactSettings ? SCREEN_DIALOG_DESIGN.settings : SCREEN_DIALOG_DESIGN.guide;
+  const anchor = screenAnchored
+    ? {
+      left: Math.max(0, stageRect.left),
+      top: Math.max(0, stageRect.top),
+      width: Math.max(0, Math.min(window.innerWidth, stageRect.right) - Math.max(0, stageRect.left)),
+      height: Math.max(0, Math.min(window.innerHeight, stageRect.bottom) - Math.max(0, stageRect.top))
+    }
     : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
-  const width = compactSettings
-    ? Math.max(240, Math.min(stageRect.width * 0.52, 500, window.innerWidth - 18))
-    : Math.max(320, Math.min(window.innerWidth * 0.88, 1120, window.innerWidth - 24));
-  const height = compactSettings
-    ? Math.max(180, Math.min(stageRect.height * 0.72, 450, window.innerHeight - 18))
-    : Math.max(240, Math.min(window.innerHeight * 0.86, 760, window.innerHeight - 24));
-  dialog.style.left = `${Math.max(9, Math.min(window.innerWidth - width - 9, anchor.left + (anchor.width - width) / 2))}px`;
-  dialog.style.top = `${Math.max(9, Math.min(window.innerHeight - height - 9, anchor.top + (anchor.height - height) / 2))}px`;
-  dialog.style.width = `${width}px`;
-  dialog.style.height = `${height}px`;
+  if (screenAnchored && (!anchor.width || !anchor.height)) return;
+  const roomWidth = screenAnchored ? anchor.width * 0.94 : window.innerWidth - 24;
+  const roomHeight = screenAnchored ? anchor.height * 0.94 : window.innerHeight - 24;
+  const zoom = Math.max(compactSettings ? 0 : 1, Math.min(compactSettings ? 3 : 2.6, roomWidth / design.width, roomHeight / design.height));
+  const width = Math.max(compactSettings ? 0 : 240, Math.min(design.width * zoom, roomWidth));
+  const height = Math.max(compactSettings ? 0 : 180, Math.min(design.height * zoom, roomHeight));
+  const centeredLeft = anchor.left + (anchor.width - width) / 2;
+  const centeredTop = anchor.top + (anchor.height - height) / 2;
+  const left = screenAnchored ? centeredLeft : Math.max(9, Math.min(window.innerWidth - width - 9, centeredLeft));
+  const top = screenAnchored ? centeredTop : Math.max(9, Math.min(window.innerHeight - height - 9, centeredTop));
+  // CSS zoom also scales a fixed element's offsets and size, so hand it unzoomed numbers.
+  dialog.style.zoom = String(zoom);
+  dialog.style.left = `${left / zoom}px`;
+  dialog.style.top = `${top / zoom}px`;
+  dialog.style.width = `${width / zoom}px`;
+  dialog.style.height = `${height / zoom}px`;
 }
+function updateInterfaceScale() {
+  const root = document.documentElement;
+  const cabinetZoom = Math.max(1, Math.min(2.4, window.innerWidth / 1100, window.innerHeight / 680));
+  const interfaceZoom = Math.max(1, Math.min(2.6, window.innerWidth / 1000, window.innerHeight / 640));
+  root.style.setProperty('--cab-zoom', cabinetZoom.toFixed(3));
+  root.style.setProperty('--ui-zoom', interfaceZoom.toFixed(3));
+}
+updateInterfaceScale();
 function showScreenDialog(dialog) {
   if (dialog.open) return;
   setScreenDialogBounds(dialog);
@@ -1972,6 +2770,7 @@ function showScreenDialog(dialog) {
 function setupSettingsOverlays() {
   const videoPane = document.querySelector('#tvSettingsVideo');
   const audioPane = document.querySelector('#tvSettingsAudio');
+  const tapesPane = document.querySelector('#tvSettingsTapes');
   for (const id of ['scanlines', 'curve']) {
     const control = document.querySelector(`#${id}`)?.closest('.dial-control');
     if (control) videoPane.append(control);
@@ -1980,28 +2779,35 @@ function setupSettingsOverlays() {
   if (volumeControl) audioPane.append(volumeControl);
   videoPane.append(
     document.querySelector('.picture-control-group'),
-    document.querySelector('.finish-panel'),
     document.querySelector('.signal-settings'),
     document.querySelector('.view-section')
   );
+  document.querySelector('#tvSettingsCabinet').append(document.querySelector('.finish-panel'));
+  document.querySelector('#tvSettingsChannels').append(document.querySelector('.channel-management'));
   audioPane.append(document.querySelector('.audio-control-group'));
+  tapesPane.append(
+    document.querySelector('.playlist-panel'),
+    document.querySelector('.deck-options'),
+    document.querySelector('.commercial-controls')
+  );
   const inputControl = document.querySelector('.input-source-control');
   document.querySelector('.simple-tv-controls').after(inputControl);
   const audioOutputLabel = audioOutputSelect.closest('label');
   if (audioOutputLabel) audioPane.append(audioOutputLabel);
-  for (const pane of [videoPane, audioPane]) pane.hidden = true;
+  for (const pane of [videoPane, audioPane, tapesPane, document.querySelector('#tvSettingsChannels')]) pane.hidden = true;
   videoPane.hidden = false;
   for (const dial of tvSettingsDialog.querySelectorAll('.dial')) dial.classList.add('dial-bar');
 }
 function selectSettingsTab(name) {
-  const selected = ['audio', 'video'].includes(name) ? name : 'video';
+  const selected = name === 'tapes' && tvSet.dataset.input === 'tv'
+    ? 'video' : ['audio', 'video', 'cabinet', 'scenes', 'breaks', 'tapes', 'channels', 'remote'].includes(name) ? name : 'video';
   for (const pane of document.querySelectorAll('.settings-pane')) pane.hidden = pane.id !== `tvSettings${selected[0].toUpperCase()}${selected.slice(1)}`;
   for (const button of document.querySelectorAll('[data-settings-tab]')) {
     if (button.dataset.settingsTab === selected) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   }
 }
-function activeChannelCommercials() { return selectedInput === 'tv' ? (activeChannel()?.movieOnly ? [] : (activeChannel()?.commercials || [])) : null; }
+function activeChannelCommercials() { return selectedInput === 'tv' ? (activeChannel()?.movieOnly || activeChannel()?.adFree ? [] : (activeChannel()?.commercials || [])) : null; }
 function activePlaylist() {
   if (selectedInput === 'tv') {
     const channel = activeChannel();
@@ -2009,9 +2815,20 @@ function activePlaylist() {
   }
   return playlists.find(item => item.id === activePlaylistId) || null;
 }
-function channelPlaybackSnapshot(channel, now = Date.now()) {
+function channelPlaybackSnapshot(channel, now = Date.now(), capturePlayback = false) {
   if (!channel?.broadcast) return channel?.savedPlaybackState || null;
-  const elapsedSeconds = broadcastElapsed(channel, now);
+  let elapsedSeconds = broadcastElapsed(channel, now);
+  const current = channel.queue?.[currentIndex];
+  if (capturePlayback && channel.id === activeChannelId && isCurrentChannelPlayback()
+    && !switchingTracks && !video.seeking && video.readyState >= 2 && Number.isFinite(video.currentTime)
+    && current?.path === activePlaybackPath && Number(current.durationSeconds) > 0) {
+    const segmentStart = channel.queue.slice(0, currentIndex)
+      .reduce((sum, segment) => sum + Math.max(0, Number(segment.durationSeconds) || 0), 0);
+    elapsedSeconds = segmentStart + Math.max(0, Math.min(
+      Number(current.durationSeconds) - 0.01,
+      playbackSourceTime() - (Number(current.sourceStartSeconds) || 0)
+    ));
+  }
   const position = locateChannelSegment(channel, elapsedSeconds);
   const queue = (channel.queue || []).slice(0, MAX_SAVED_CHANNEL_QUEUE_ENTRIES).map(item => ({
     path: item.path,
@@ -2022,6 +2839,10 @@ function channelPlaybackSnapshot(channel, now = Date.now()) {
     programSequence: Number.isFinite(Number(item.programSequence)) ? Number(item.programSequence) : 0,
     breakSequence: Number.isFinite(Number(item.breakSequence)) ? Number(item.breakSequence) : 0,
     adBreakPosition: Number.isFinite(Number(item.adBreakPosition)) ? Number(item.adBreakPosition) : 0,
+    ...(Number(item.breakTargetSeconds) > 0 ? { breakTargetSeconds: Number(item.breakTargetSeconds) } : {}),
+    ...(CHANNEL_BREAK_KINDS.has(item.startCutKind) ? { startCutKind: item.startCutKind } : {}),
+    ...(CHANNEL_BREAK_KINDS.has(item.endCutKind) ? { endCutKind: item.endCutKind } : {}),
+    ...(Number(item.cutVersion) > 0 ? { cutVersion: Number(item.cutVersion) } : {}),
     title: item.title || '',
     showName: item.showName || '',
     size: Number.isFinite(Number(item.size)) ? Number(item.size) : null,
@@ -2051,7 +2872,7 @@ function channelPlaybackSnapshot(channel, now = Date.now()) {
     nextProgrammeSequence: Math.max(0, Number(channel.nextProgrammeSequence) || 0)
   };
 }
-function persistChannels() {
+function persistChannels(capturePlayback = false) {
   try {
     const now = Date.now();
     const stored = channels.map(channel => ({
@@ -2061,50 +2882,189 @@ function persistChannels() {
       root: channel.root,
       movieOnly: channel.movieOnly === true,
       rotation: channel.rotation || {},
-      playbackState: channelPlaybackSnapshot(channel, now),
+      playbackState: channelPlaybackSnapshot(channel, now, capturePlayback),
       enabled: channel.enabled !== false,
+      adFree: channel.adFree === true,
       disabledShowPaths: Array.isArray(channel.disabledShowPaths) ? channel.disabledShowPaths : []
     }));
     localStorage.setItem(CHANNELS_KEY, JSON.stringify(stored));
     localStorage.setItem('saturdayTube.activeChannel.v1', activeChannelId);
   } catch (error) { console.error('TV channels could not be saved', error); setStatus('TV CHANNEL SETTINGS COULD NOT BE SAVED'); }
 }
-function renderChannels() {
-  const channel = activeChannel();
-  rescanChannelButton.disabled = !channel || Boolean(channel.scanning) || !channelsStartupReady;
-  if (channelSurfName) {
-    channelSurfName.textContent = channel?.name || 'NO CHANNEL';
-    channelSurfName.title = channel?.name || 'Add a TV channel folder to enable channel surfing.';
+function loadYoutubeStarterConfigurations() {
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem(YOUTUBE_STARTERS_KEY) || '[]'); } catch { /* Fresh or invalid settings use blank starter slots. */ }
+  const sourceApi = globalThis.SaturdayTubeYouTubeSources;
+  if (!sourceApi || typeof sourceApi.normalizeStarterConfigurations !== 'function') {
+    return [];
   }
-  const hasSurfableChannel = channelsStartupReady && channels.some(item => item.enabled !== false && item.scanComplete && !item.error);
+  return sourceApi.normalizeStarterConfigurations(saved);
+}
+function activeYoutubeStarter() {
+  return youtubeStarterConfigurations.find(item => item.id === activeYoutubeStarterId && item.program) || null;
+}
+function configuredYoutubeStarters() {
+  return youtubeStarterConfigurations.filter(item => item.program);
+}
+function persistYoutubeStarterConfigurations() {
+  try {
+    const sourceApi = globalThis.SaturdayTubeYouTubeSources;
+    if (!sourceApi || typeof sourceApi.serializeStarterConfigurations !== 'function') return;
+    localStorage.setItem(YOUTUBE_STARTERS_KEY, JSON.stringify(sourceApi.serializeStarterConfigurations(youtubeStarterConfigurations)));
+  } catch (error) { console.error('YouTube starter settings could not be saved', error); setStatus('YOUTUBE CHANNEL SETTINGS COULD NOT BE SAVED'); }
+}
+function renderYoutubeStarterSetup() {
+  if (!youtubeStarterRows) return;
+  youtubeStarterRows.replaceChildren();
+  for (const starter of youtubeStarterConfigurations) {
+    const row = document.createElement('article');
+    row.className = 'youtube-starter-row';
+    const heading = document.createElement('h4');
+    heading.textContent = starter.name;
+    const watch = document.createElement('button');
+    watch.type = 'button';
+    watch.textContent = 'WATCH';
+    const fields = document.createElement('div');
+    fields.className = 'youtube-starter-fields';
+    const programLabel = document.createElement('label');
+    programLabel.textContent = 'PROGRAM VIDEO OR PLAYLIST';
+    const programInput = document.createElement('input');
+    programInput.type = 'url';
+    programInput.autocomplete = 'off';
+    programInput.placeholder = 'Paste public YouTube link';
+    programInput.setAttribute('aria-label', `${starter.name} programme YouTube link`);
+    programInput.value = starter.programUrl;
+    programLabel.append(programInput);
+    const commercialLabel = document.createElement('label');
+    commercialLabel.textContent = 'PROGRAM BREAK VIDEO OR PLAYLIST · OPTIONAL';
+    const commercialInput = document.createElement('input');
+    commercialInput.type = 'url';
+    commercialInput.autocomplete = 'off';
+    commercialInput.placeholder = 'YouTube video or playlist link';
+    commercialInput.setAttribute('aria-label', `${starter.name} optional commercials playlist`);
+    commercialInput.value = starter.commercialsUrl;
+    commercialLabel.append(commercialInput);
+    fields.append(programLabel, commercialLabel);
+    const status = document.createElement('output');
+    const refreshReadiness = () => {
+      const program = window.SaturdayTubeYouTubeSources.parseYouTubeSource(programInput.value);
+      const adText = commercialInput.value.trim();
+      const ads = adText ? window.SaturdayTubeYouTubeSources.parseYouTubeSource(adText) : null;
+      watch.disabled = !program || Boolean(adText && !ads);
+      status.textContent = !program ? 'ADD A PUBLIC YOUTUBE VIDEO OR PLAYLIST LINK' : adText && !ads
+        ? 'ADD A VALID YOUTUBE COMMERCIAL VIDEO OR PLAYLIST' : starter.program ? 'SOURCE SAVED · EMBEDDING AVAILABILITY CAN CHANGE' : 'LINKS ARE NOT SAVED';
+    };
+    programInput.addEventListener('input', refreshReadiness);
+    commercialInput.addEventListener('input', refreshReadiness);
+    watch.addEventListener('click', () => {
+      const program = window.SaturdayTubeYouTubeSources.parseYouTubeSource(programInput.value);
+      const adText = commercialInput.value.trim();
+      const commercials = adText ? window.SaturdayTubeYouTubeSources.parseYouTubeSource(adText) : null;
+      if (!program || (adText && !commercials)) { refreshReadiness(); return; }
+      starter.program = program;
+      starter.commercials = commercials;
+      starter.programUrl = window.SaturdayTubeYouTubeSources.canonicalYouTubeUrl(program);
+      starter.commercialsUrl = window.SaturdayTubeYouTubeSources.canonicalYouTubeUrl(commercials);
+      programInput.value = starter.programUrl;
+      commercialInput.value = starter.commercialsUrl;
+      persistYoutubeStarterConfigurations();
+      refreshReadiness();
+      selectYoutubeStarter(starter.id);
+    });
+    row.append(heading, watch, fields, status);
+    youtubeStarterRows.append(row);
+    refreshReadiness();
+  }
+}
+function currentChannelSelectionKey() {
+  return activeYoutubeStarter() ? `youtube:${activeYoutubeStarterId}` : activeChannelId ? `local:${activeChannelId}` : '';
+}
+function selectYoutubeStarter(id) {
+  const starter = youtubeStarterConfigurations.find(item => item.id === id && item.program);
+  if (!starter || !channelsStartupReady) return;
+  const previous = currentChannelSelectionKey();
+  if (selectedInput === 'tv' && !activeYoutubeStarter()) saveChannelPlaybackState();
+  if (previous && previous !== `youtube:${starter.id}`) previousChannelId = previous;
+  activeYoutubeStarterId = starter.id;
+  try { localStorage.setItem(YOUTUBE_ACTIVE_KEY, starter.id); } catch { /* The current station still works if storage is unavailable. */ }
+  channelTuneToken += 1;
+  if (selectedInput !== 'tv') setInputSource('tv');
+  else {
+    clearChannelVideoForInputChange();
+    setTVSearching(true);
+    void startActiveChannel();
+  }
+  renderChannels();
+  syncBypassControls();
+  showChannelSurfText(`${starter.name} · STREAMING`);
+}
+function renderChannels() {
+  assignChannelAbbreviations();
+  const streaming = activeYoutubeStarter();
+  const channel = streaming ? null : activeChannel();
+  rescanChannelButton.disabled = streaming || !channel || Boolean(channel.scanning) || !channelsStartupReady || Boolean(channelRefreshPromise);
+  updateGuideShuffleControls();
+  if (channelSurfName) {
+    channelSurfName.textContent = streaming?.name || channel?.name || 'NO CHANNEL';
+    channelSurfName.title = streaming ? `${streaming.name} · YouTube embedded player` : channel?.name || 'Add a TV channel folder or a YouTube starter link.';
+  }
+  const hasSurfableChannel = channelsStartupReady && (channels.some(item => item.enabled !== false && !item.error) || configuredYoutubeStarters().length > 0);
   if (channelDownButton) channelDownButton.disabled = !hasSurfableChannel;
   if (channelUpButton) channelUpButton.disabled = !hasSurfableChannel;
-  channelStatus.textContent = !channelsStartupReady ? 'PREPARING TV CHANNELS…' : channel?.scanning ? 'SCANNING…' : channel?.error ? 'FOLDER OFFLINE' : channel && !channel.scanComplete ? 'READY TO SCAN' : channel
-    ? channel.movieOnly
-      ? `${channel.episodeCount || 0} MOVIES · BACK-TO-BACK · NO ADS`
-      : `${channel.showCount || 0} SHOW${channel.showCount === 1 ? '' : 'S'} · ${channel.episodeCount || 0} EPS · ${channel.commercialCount || 0} ADS`
-    : 'NO CHANNELS SET UP';
-  channelRootPath.textContent = channel?.root || 'Choose a folder with one subfolder per show and an optional Commercials subfolder.';
-  channelRootPath.title = channel?.root || '';
-  channelSummary.textContent = channel?.error
-    ? channel.error
-    : channel?.movieOnly
-      ? 'MOVIES ONLY · NO COMMERCIALS OR TRAILERS · FEATURES PLAY BACK-TO-BACK.'
-      : channel?.showCount
-        ? channel.enabled === false
-          ? 'CHANNEL DISABLED · ENABLE IT IN THE TV GUIDE.'
-          : (channel.commercialCount || 0) === 0
-            ? 'NO APPROVED CHANNEL ADS · REQUIRED BREAKS CANNOT PLAY UNTIL ADS ARE ADDED.'
-            : 'Episodes play in season and episode order, starting with the earliest available. A full commercial break follows every episode.'
-        : channel
-          ? 'No show episodes yet.'
-          : 'Folders stay where they are; Saturday Tube reads episodes and channel-only commercials in place.';
+  channelStatus.textContent = streaming
+    ? `YOUTUBE · ${streaming.program.kind.toUpperCase()} PROGRAM${streaming.commercials ? ' · OPTIONAL AD PLAYLIST' : ''}`
+    : !channelsStartupReady ? 'PREPARING TV CHANNELS…' : channelRefreshPromise ? 'REFRESHING PLAYLISTS…' : channel?.scanning ? 'SCANNING…' : channel?.error ? 'FOLDER OFFLINE' : channel && !channel.scanComplete ? 'WARMING UP IN BACKGROUND…' : channel
+      ? channel.movieOnly
+        ? `${channel.episodeCount || 0} MOVIES · BACK-TO-BACK · NO ADS`
+        : `${channel.showCount || 0} SHOW${channel.showCount === 1 ? '' : 'S'} · ${channel.episodeCount || 0} EPS · ${channel.commercialCount || 0} ADS`
+      : channels.length ? 'NO CHANNELS SET UP' : 'NO LOCAL CHANNELS · ADD YOUTUBE LINKS BELOW';
+  channelRootPath.textContent = streaming ? 'SOURCE · Official YouTube embedded player' : channel?.root || 'Each channel folder holds show subfolders or loose videos; a Commercials folder is optional.';
+  channelRootPath.title = streaming ? 'YouTube playback uses the official embedded player.' : channel?.root || '';
+  const source = localStorage.getItem(CHANNEL_SOURCE_KEY) || '';
+  channelSourcePath.textContent = source
+    ? `SOURCE · ${source}${channel?.playlistCached ? ' · SAVED PLAYLISTS · REFRESH AFTER EDITING FOLDERS' : ''}`
+    : 'No channel source set · every folder inside it becomes a channel.';
+  channelSourcePath.title = source;
+  channelSummary.textContent = streaming
+    ? 'YouTube retains its player controls, ads and branding. The optional retro-commercial playlist runs after the programming list ends.'
+    : channel?.error
+      ? channel.error
+      : channel?.movieOnly
+        ? 'MOVIES ONLY · NO COMMERCIALS OR TRAILERS · FEATURES PLAY BACK-TO-BACK.'
+        : channel?.showCount
+          ? channel.enabled === false
+            ? 'CHANNEL DISABLED · ENABLE IT IN THE TV GUIDE.'
+            : (channel.commercialCount || 0) === 0
+              ? 'NO COMMERCIALS · SHOWS PLAY BACK-TO-BACK WITHOUT BREAKS.'
+              : 'Episodes play in season and episode order, starting with the earliest available. A full commercial break follows every episode.'
+          : channel
+            ? 'No show episodes yet.'
+            : 'Folders stay where they are; Saturday Tube reads episodes and channel-only commercials in place.';
   if (channelSetupNotice) {
     channelStatus.textContent = channelSetupNotice;
     channelSummary.textContent = 'Check folder access and try again.';
   }
 }
+function updateGuideShuffleControls() {
+  const busy = Boolean(channelRefreshPromise);
+  document.querySelector('#tvGuideShuffle').disabled = busy || !channelsStartupReady || !channels.length
+    || channels.some(channel => channel.adFreeUpdating || channel.guideEditPromise);
+  document.querySelector('#tvGuideShuffle').textContent = busy && channelShuffleStatus.startsWith('SHUFFLING') ? 'SHUFFLING…' : 'SHUFFLE ALL';
+  document.querySelector('#tvGuideShuffleStatus').textContent = channelShuffleStatus;
+  document.querySelector('#tvGuideAdd').disabled = busy;
+}
+function tvGuideLineup() {
+  return [
+    ...channels.map(channel => ({ kind: 'local', id: channel.id, channel })),
+    ...configuredYoutubeStarters().map(starter => ({ kind: 'youtube', id: starter.id, starter }))
+  ];
+}
+function currentGuideChannel() {
+  const item = tvGuideLineup()[tvGuidePageIndex];
+  return item?.kind === 'local' ? item.channel : null;
+}
 function renderTVGuide() {
+  updateGuideShuffleControls();
   tvGuidePageContent.replaceChildren();
   const spread = document.createElement('div');
   spread.className = 'guide-open-spread';
@@ -2114,7 +3074,8 @@ function renderTVGuide() {
   const rightPage = document.createElement('section');
   rightPage.className = 'guide-book-page guide-page-right';
   rightPage.setAttribute('aria-label', 'Live episode listings');
-  if (!channels.length) {
+  const lineup = tvGuideLineup();
+  if (!lineup.length) {
     tvGuidePage.textContent = 'PAGE 0 / 0';
     const leftHeading = document.createElement('div');
     leftHeading.className = 'guide-running-head';
@@ -2124,10 +3085,10 @@ function renderTVGuide() {
     leftEmpty.textContent = 'NO CHANNELS IN THE LINEUP';
     const rightHeading = document.createElement('div');
     rightHeading.className = 'guide-running-head';
-    rightHeading.textContent = 'LOCAL TV LISTINGS';
+    rightHeading.textContent = 'TV LISTINGS';
     const rightEmpty = document.createElement('p');
     rightEmpty.className = 'guide-empty';
-    rightEmpty.textContent = 'ADD A CHANNEL TO PRINT ITS LIVE SCHEDULE.';
+    rightEmpty.textContent = 'ADD A CHANNEL OR CONFIGURE A STREAMING STARTER.';
     leftPage.append(leftHeading, leftEmpty);
     rightPage.append(rightHeading, rightEmpty);
     spread.append(leftPage, rightPage);
@@ -2136,30 +3097,91 @@ function renderTVGuide() {
     document.querySelector('#tvGuideNext').disabled = true;
     return;
   }
-  tvGuidePageIndex = (tvGuidePageIndex + channels.length) % channels.length;
-  const channel = channels[tvGuidePageIndex];
-  tvGuidePage.textContent = `PAGE ${tvGuidePageIndex + 1} / ${channels.length}`;
-  document.querySelector('#tvGuidePrevious').disabled = channels.length < 2;
-  document.querySelector('#tvGuideNext').disabled = channels.length < 2;
+  tvGuidePageIndex = (tvGuidePageIndex + lineup.length) % lineup.length;
+  const guideItem = lineup[tvGuidePageIndex];
+  tvGuidePage.textContent = `PAGE ${tvGuidePageIndex + 1} / ${lineup.length}`;
+  document.querySelector('#tvGuidePrevious').disabled = lineup.length < 2;
+  document.querySelector('#tvGuideNext').disabled = lineup.length < 2;
+  if (guideItem.kind === 'youtube') {
+    const starter = guideItem.starter;
+    const leftHeading = document.createElement('div');
+    leftHeading.className = 'guide-running-head';
+    leftHeading.textContent = `PUBLIC STREAMING STARTER · ${tvGuidePageIndex + 1} OF ${lineup.length}`;
+    const channelRow = document.createElement('div');
+    channelRow.className = 'guide-channel-row';
+    const channelName = document.createElement('strong');
+    channelName.textContent = starter.name;
+    const channelMeta = document.createElement('small');
+    channelMeta.textContent = `YOUTUBE · ${starter.program.kind.toUpperCase()} PROGRAM`;
+    channelRow.append(channelName, channelMeta);
+    const watchButton = document.createElement('button');
+    watchButton.type = 'button';
+    watchButton.textContent = `WATCH ${starter.name.toUpperCase()} · ENTER`;
+    watchButton.addEventListener('click', tuneGuideChannel);
+    const note = document.createElement('p');
+    note.className = 'guide-management-note';
+    note.textContent = 'THE OFFICIAL EMBEDDED YOUTUBE PLAYER RETAINS ITS PLAYER CONTROLS, ADS AND BRANDING.';
+    leftPage.append(leftHeading, channelRow, watchButton, note);
+
+    const rightHeading = document.createElement('div');
+    rightHeading.className = 'guide-running-head';
+    rightHeading.textContent = 'PROGRAM & BREAK SOURCES';
+    const sources = document.createElement('div');
+    sources.className = 'guide-date-window';
+    const program = document.createElement('strong');
+    program.textContent = `PROGRAM · ${starter.program.kind.toUpperCase()}`;
+    const breaks = document.createElement('em');
+    breaks.textContent = starter.commercials ? `PROGRAM BREAK · ${starter.commercials.kind.toUpperCase()}` : 'PROGRAM BREAK · NONE SET';
+    const availability = document.createElement('small');
+    availability.textContent = 'NO SCHEDULE METADATA · VIDEO AVAILABILITY MAY VARY';
+    sources.append(program, breaks, availability);
+    const scheduleNote = document.createElement('p');
+    scheduleNote.className = 'guide-commercial-note';
+    scheduleNote.textContent = 'PROGRAM BREAK SOURCE PLAYS AFTER THE SELECTED PROGRAM SOURCE ENDS.';
+    rightPage.append(rightHeading, sources, scheduleNote);
+    spread.append(leftPage, rightPage);
+    tvGuidePageContent.append(spread);
+    return;
+  }
+  const channel = guideItem.channel;
 
   const nowMs = Date.now();
   const windowStart = new Date(nowMs);
   const windowEnd = new Date(nowMs + GUIDE_WINDOW_SECONDS * 1000);
   const leftRunningHead = document.createElement('div');
   leftRunningHead.className = 'guide-running-head';
-  leftRunningHead.textContent = `CHANNEL DIRECTORY · ${tvGuidePageIndex + 1} OF ${channels.length}`;
+  leftRunningHead.textContent = `CHANNEL DIRECTORY · ${tvGuidePageIndex + 1} OF ${tvGuideLineup().length}`;
   const channelRow = document.createElement('label');
   channelRow.className = 'guide-channel-row';
   const channelCheck = document.createElement('input');
   channelCheck.type = 'checkbox';
   channelCheck.checked = channel.enabled !== false;
+  channelCheck.disabled = Boolean(channelRefreshPromise);
   channelCheck.setAttribute('aria-label', `Enable ${channel.name}`);
   channelCheck.addEventListener('change', () => { void setGuideChannelEnabled(channel.id, channelCheck.checked); });
   const channelName = document.createElement('strong');
   channelName.textContent = channel.name;
+  const channelNumber = document.createElement('b');
+  channelNumber.className = 'guide-directory-number';
+  channelNumber.textContent = `CH ${channelDialNumber(channel)}`;
   const channelMeta = document.createElement('small');
   channelMeta.textContent = `${channel.showCount || 0} SHOWS · ${channel.episodeCount || 0} EPISODES`;
-  channelRow.append(channelCheck, channelName, channelMeta);
+  channelRow.append(channelCheck, channelNumber, channelName, channelMeta);
+  const channelActions = document.createElement('div');
+  channelActions.className = 'guide-channel-actions';
+  const tuneButton = document.createElement('button');
+  tuneButton.type = 'button';
+  tuneButton.textContent = `WATCH CH ${channelDialNumber(channel)} · ENTER`;
+  tuneButton.disabled = channel.enabled === false;
+  tuneButton.addEventListener('click', tuneGuideChannel);
+  const adFreeButton = document.createElement('button');
+  adFreeButton.type = 'button';
+  adFreeButton.textContent = `AD FREE · ${channel.adFree ? 'ON' : 'OFF'}`;
+  adFreeButton.setAttribute('aria-pressed', String(channel.adFree === true));
+  adFreeButton.setAttribute('aria-label', `Ad free for ${channel.name}`);
+  adFreeButton.disabled = Boolean(channel.adFreeUpdating || channel.guideEditPromise || channelRefreshPromise);
+  adFreeButton.addEventListener('click', () => { void setGuideAdFree(channel, !channel.adFree); });
+  channelActions.append(tuneButton, adFreeButton);
 
   const includedShows = (channel.shows || []).filter(show => show.enabled !== false && !channel.disabledShowPaths?.includes(show.path)).length;
   const showHeading = document.createElement('div');
@@ -2183,7 +3205,7 @@ function renderTVGuide() {
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.checked = !channel.disabledShowPaths?.includes(show.path);
-      check.disabled = channel.enabled === false;
+      check.disabled = channel.enabled === false || Boolean(channel.adFreeUpdating || channel.guideEditPromise || channelRefreshPromise);
       check.setAttribute('aria-label', `Include ${show.name} in the schedule`);
       check.addEventListener('change', () => { void setGuideShowEnabled(channel.id, show.path, check.checked); });
       const name = document.createElement('span');
@@ -2197,7 +3219,7 @@ function renderTVGuide() {
   const managementNote = document.createElement('p');
   managementNote.className = 'guide-management-note';
   managementNote.textContent = 'CHECK SHOWS TO INCLUDE THEM IN THIS CHANNEL’S ROTATION.';
-  leftPage.append(leftRunningHead, channelRow, showHeading, showList, managementNote);
+  leftPage.append(leftRunningHead, channelRow, channelActions, showHeading, showList, managementNote);
 
   const rightRunningHead = document.createElement('div');
   rightRunningHead.className = 'guide-running-head';
@@ -2205,10 +3227,12 @@ function renderTVGuide() {
   const dateWindow = document.createElement('div');
   dateWindow.className = 'guide-date-window';
   const dateLabel = document.createElement('strong');
-  dateLabel.textContent = windowStart.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase();
+  dateLabel.textContent = windowStart.toLocaleDateString([], { weekday: 'long' });
+  const dateLine = document.createElement('em');
+  dateLine.textContent = windowStart.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
   const timeLabel = document.createElement('small');
   timeLabel.textContent = `${windowStart.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} — ${windowEnd.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · LOCAL TIME`;
-  dateWindow.append(dateLabel, timeLabel);
+  dateWindow.append(dateLabel, dateLine, timeLabel);
 
   const schedule = document.createElement('section');
   schedule.className = 'guide-schedule';
@@ -2249,11 +3273,14 @@ function renderTVGuide() {
       const when = document.createElement('time');
       when.dateTime = scheduledAt.toISOString();
       when.textContent = isCurrentProgram ? 'NOW' : scheduledAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const bug = document.createElement('b');
+      bug.className = 'guide-channel-bug';
+      bug.textContent = String(channelDialNumber(channel));
       const kind = document.createElement('small');
       kind.textContent = segment.showName || 'PROGRAM';
       const title = document.createElement('span');
-      title.textContent = segment.title || 'Episode';
-      row.append(when, kind, title);
+      title.textContent = String(segment.title || 'Episode').replace(/\.(?:mkv|mp4|m4v|mov|webm|avi|mpe?g|wmv|flv|ts|vob|ogv)$/i, '');
+      row.append(when, bug, kind, title);
       scheduleList.append(row);
       shown += 1;
     }
@@ -2265,14 +3292,58 @@ function renderTVGuide() {
   }
   const scheduleNote = document.createElement('p');
   scheduleNote.className = 'guide-commercial-note';
-  scheduleNote.textContent = 'COMMERCIALS ARE OMITTED; THEIR AIRTIME STILL COUNTS TOWARD EVERY START TIME.';
+  scheduleNote.textContent = channel.adFree
+    ? 'AD FREE · COMMERCIALS ARE DISABLED ON THIS CHANNEL.'
+    : 'COMMERCIALS ARE OMITTED; THEIR AIRTIME STILL COUNTS TOWARD EVERY START TIME.';
   schedule.append(scheduleHeading, scheduleList, scheduleNote);
   rightPage.append(rightRunningHead, dateWindow, schedule);
   spread.append(leftPage, rightPage);
   tvGuidePageContent.append(spread);
   if (tvGuideDialog.open && channel.enabled !== false && !channel.scanning && !channel.error) {
-    if (!channel.scanComplete) void scanChannel(channel);
+    if (!channel.scanComplete) void warmChannelsInBackground();
     else void ensureGuideSchedule(channel);
+  }
+}
+function tuneGuideChannel() {
+  const item = tvGuideLineup()[tvGuidePageIndex];
+  if (!item) return;
+  if (item.kind === 'youtube') {
+    tvGuideDialog.close();
+    selectYoutubeStarter(item.id);
+    if (selectedInput !== 'tv') setInputSource('tv');
+    return;
+  }
+  if (item.channel.enabled === false) {
+    setStatus('CHANNEL OFF AIR · ENABLE IT IN THE GUIDE');
+    return;
+  }
+  tvGuideDialog.close();
+  selectActiveChannel(item.id);
+  if (selectedInput !== 'tv') setInputSource('tv');
+}
+function channelCommercials(channel) {
+  return channel.adFree === true ? [] : channel.commercials || [];
+}
+async function setGuideAdFree(channel, enabled) {
+  if (channel.adFreeUpdating) return;
+  channel.adFreeUpdating = true;
+  renderTVGuide();
+  const previous = channel.adFree === true;
+  try {
+    if (channel.broadcastInitPromise) await channel.broadcastInitPromise;
+    if (channel.broadcast?.queuePromise) await channel.broadcast.queuePromise;
+    const snapshot = channelPlaybackSnapshot(channel, Date.now(), true);
+    channel.adFree = enabled;
+    await rebuildGuideChannel(channel, snapshot);
+    if (!enabled) await fillChannelCommercialBreaks(channel);
+    persistChannels();
+  } catch (error) {
+    channel.adFree = previous;
+    console.error('Channel commercial preference could not be changed', error);
+    setStatus('AD FREE CHANGE FAILED · TRY AGAIN');
+  } finally {
+    channel.adFreeUpdating = false;
+    renderTVGuide();
   }
 }
 async function ensureGuideSchedule(channel) {
@@ -2282,24 +3353,28 @@ async function ensureGuideSchedule(channel) {
     if (!channel.broadcast) await initializeChannelBroadcast(channel);
     const elapsed = broadcastElapsed(channel);
     await appendBroadcastCoverage(channel, elapsed + GUIDE_WINDOW_SECONDS);
-    if (tvGuideDialog.open && channels[tvGuidePageIndex]?.id === channel.id) renderTVGuide();
+    if (tvGuideDialog.open && currentGuideChannel()?.id === channel.id) renderTVGuide();
   })();
   channel.guideSchedulePromise = pending;
   try { await pending; }
   finally { if (channel.guideSchedulePromise === pending) channel.guideSchedulePromise = null; }
 }
 function openTVGuide() {
-  tvGuidePageIndex = Math.max(0, channels.findIndex(channel => channel.id === activeChannelId));
+  if (tvSet.dataset.input !== 'tv') return;
+  const selection = currentChannelSelectionKey();
+  const lineup = tvGuideLineup();
+  const currentIndex = lineup.findIndex(item => `${item.kind === 'youtube' ? 'youtube' : 'local'}:${item.id}` === selection);
+  tvGuidePageIndex = Math.max(0, currentIndex);
   renderTVGuide();
   showScreenDialog(tvGuideDialog);
   if (guideRefreshTimer) window.clearInterval(guideRefreshTimer);
-  const channel = channels[tvGuidePageIndex];
+  const channel = currentGuideChannel();
   if (channel) void ensureGuideSchedule(channel);
   guideRefreshTimer = window.setInterval(() => {
     if (!tvGuideDialog.open) return;
-    const channel = channels[tvGuidePageIndex];
     renderTVGuide();
-    if (channel) void ensureGuideSchedule(channel);
+    const pageChannel = currentGuideChannel();
+    if (pageChannel) void ensureGuideSchedule(pageChannel);
   }, 5000);
 }
 function stopTVGuideRefresh() {
@@ -2345,8 +3420,17 @@ async function setGuideShowEnabled(channelId, showPath, enabled) {
   if (enabled) disabled.delete(showPath); else disabled.add(showPath);
   channel.disabledShowPaths = [...disabled];
   channel.shows = (channel.shows || []).map(show => show.path === showPath ? { ...show, enabled } : show);
-  const eligibleShows = channel.shows.filter(show => show.enabled !== false && !channel.disabledShowPaths.includes(show.path));
-  const restored = await window.tube.reconcileChannelPlayback(eligibleShows, channel.commercials || [], {
+  channel.guideEditPromise = rebuildGuideChannel(channel, snapshot);
+  updateGuideShuffleControls();
+  try { await channel.guideEditPromise; }
+  finally {
+    channel.guideEditPromise = null;
+    renderTVGuide();
+  }
+}
+async function rebuildGuideChannel(channel, snapshot) {
+  const eligibleShows = channel.shows.filter(show => show.enabled !== false && !channel.disabledShowPaths?.includes(show.path));
+  const restored = await window.tube.reconcileChannelPlayback(eligibleShows, channelCommercials(channel), {
     ...(snapshot || {}),
     rotation: snapshot?.rotation || channel.rotation || {}
   });
@@ -2377,7 +3461,7 @@ async function setGuideShowEnabled(channelId, showPath, enabled) {
   }
 }
 function saveChannelPlaybackState() {
-  persistChannels();
+  persistChannels(true);
 }
 function recordChannelPlayback(channel, track, now = Date.now()) {
   if (!channel || !track || !Number.isFinite(Number(track.sequence))) return;
@@ -2399,6 +3483,8 @@ function recordChannelPlayback(channel, track, now = Date.now()) {
 function broadcastElapsed(channel, now = Date.now()) {
   const broadcast = channel?.broadcast;
   if (!broadcast || !Number.isFinite(broadcast.startedAtMs)) return 0;
+  if (channel.restorePending) return Math.max(0, Number(broadcast.initialOffsetSeconds) || 0);
+  if (window.SaturdayIntermission?.active) now = Math.min(now, window.SaturdayIntermission.startedAt);
   return Math.max(0, Number(broadcast.initialOffsetSeconds) || 0) + Math.max(0, now - broadcast.startedAtMs) / 1000;
 }
 function locateChannelSegment(channel, elapsedSeconds) {
@@ -2436,6 +3522,7 @@ function appendBroadcastQueue(channel, generated) {
   let activeBreakSequence = null;
   let adBreakPosition = 0;
   for (const segment of generated.queue || []) {
+    if (channel.adFree && segment.segmentType === 'commercial') continue;
     const source = byPath.get(segment.path);
     if (!source?.url || !Number.isFinite(Number(segment.durationSeconds)) || Number(segment.durationSeconds) <= 0) continue;
     const isCommercial = segment.segmentType === 'commercial';
@@ -2475,6 +3562,7 @@ function appendBroadcastQueue(channel, generated) {
     episodeOrderVersion: generated.episodeOrderVersion || 'season-episode-v1',
     episodeBags: generated.episodeBags || {},
     lastEpisodeByShow: generated.lastEpisodeByShow || {},
+    lastShowPath: generated.lastShowPath || '',
     lastCommercialPath: generated.lastCommercialPath || '',
     commercialBagPaths: generated.commercialBagPaths || [],
     recentCommercialPaths: generated.recentCommercialPaths || []
@@ -2482,6 +3570,84 @@ function appendBroadcastQueue(channel, generated) {
   channel.broadcast.totalDurationSeconds = Number(channel.broadcast.totalDurationSeconds) || 0;
   for (const item of channel.queue.slice(previousLength)) channel.broadcast.totalDurationSeconds += Number(item.durationSeconds) || 0;
   persistChannels();
+}
+async function fillChannelCommercialBreaks(channel) {
+  if (channel.adFree) return;
+  if (!channel?.broadcast || !channel.queue?.length || !channel.commercials?.length) return;
+  if (channel.broadcast.queuePromise) await channel.broadcast.queuePromise;
+  const position = locateChannelSegment(channel, broadcastElapsed(channel));
+  const startIndex = position ? position.index : 0;
+  const scheduled = channel.queue.slice(startIndex);
+  // Keep what is on air (and the rest of a break already under way); later breaks are re-dealt from the current ad library.
+  let keepCount = 1;
+  if (scheduled[0]?.segmentType === 'commercial') while (scheduled[keepCount]?.segmentType === 'commercial') keepCount += 1;
+  const upcoming = [];
+  // Durations of merged halves are applied only once the rebuilt queue is committed.
+  const mergedDurations = new Map();
+  const durationOf = item => mergedDurations.get(item) ?? (Number(item.durationSeconds) || 0);
+  for (const item of [...scheduled.slice(0, keepCount), ...scheduled.slice(keepCount).filter(entry => entry.segmentType !== 'commercial')]) {
+    const previous = upcoming[upcoming.length - 1];
+    // Short programmes such as music videos air whole; only their end gets a break.
+    if (previous && item.segmentType === 'program' && previous.segmentType === 'program' && previous.path === item.path
+      && Number(item.mediaDurationSeconds) < CHANNEL_MIN_MIDROLL_PROGRAM_SECONDS
+      && Math.abs((Number(previous.sourceStartSeconds) || 0) + durationOf(previous) - (Number(item.sourceStartSeconds) || 0)) < 0.5) {
+      mergedDurations.set(previous, durationOf(previous) + (Number(item.durationSeconds) || 0));
+      continue;
+    }
+    upcoming.push(item);
+  }
+  if (!upcoming.some((item, index) => item.segmentType === 'program' && upcoming[index + 1]?.segmentType !== 'commercial')) return;
+  const filled = await window.tube.fillChannelCommercialBreaks(
+    upcoming.map(item => ({ path: item.path, segmentType: item.segmentType, durationSeconds: durationOf(item) })),
+    channel.commercials.map(item => ({ path: item.path, durationSeconds: item.durationSeconds })),
+    channel.rotation || {}
+  );
+  if (!filled?.breaks?.length || !channels.includes(channel) || channel.adFree) return;
+  const byPath = new Map(channel.commercials.map(item => [item.path, { ...item, showName: 'COMMERCIALS' }]));
+  const breaksAfter = new Map(filled.breaks.map(entry => [entry.afterIndex, entry.segments]));
+  const rebuilt = [];
+  upcoming.forEach((item, index) => {
+    rebuilt.push(item);
+    for (const segment of breaksAfter.get(index) || []) {
+      const source = byPath.get(segment.path);
+      if (!source?.url) continue;
+      rebuilt.push({ ...source, ...segment, id: source.id, url: source.url, title: segment.title || source.title, showName: 'COMMERCIALS',
+        segmentType: 'commercial', channelMedia: true, channelAd: true, managedLocalCopy: false, unavailable: false,
+        programSequence: Number(item.programSequence) || 0 });
+    }
+  });
+  // Only unaired items are renumbered, so play history and the on-air segment are unaffected.
+  let sequence = Number.isFinite(Number(upcoming[0]?.sequence)) ? Number(upcoming[0].sequence) : Number(channel.nextSequence) || 0;
+  let breakSequence = null;
+  let adBreakPosition = 0;
+  rebuilt.forEach((item, index) => {
+    if (index > 0) item.sequence = ++sequence;
+    if (item.segmentType === 'commercial') {
+      if (breakSequence === null) breakSequence = item.sequence;
+      item.breakSequence = breakSequence;
+      item.adBreakPosition = ++adBreakPosition;
+    } else {
+      breakSequence = null;
+      adBreakPosition = 0;
+    }
+  });
+  for (const [item, durationSeconds] of mergedDurations) {
+    item.durationSeconds = durationSeconds;
+    delete item.endCutKind;
+  }
+  channel.queue.splice(startIndex, scheduled.length, ...rebuilt);
+  channel.nextSequence = Math.max(Number(channel.nextSequence) || 0, sequence + 1);
+  channel.broadcast.totalDurationSeconds = channel.queue.reduce((sum, item) => sum + (Number(item.durationSeconds) || 0), 0);
+  channel.rotation = {
+    ...(channel.rotation || {}),
+    lastCommercialPath: filled.lastCommercialPath || '',
+    commercialBagPaths: filled.commercialBagPaths || [],
+    recentCommercialPaths: filled.recentCommercialPaths || []
+  };
+  persistChannels();
+  if (selectedInput === 'tv' && activeChannelId === channel.id) renderPlaylist();
+  renderTVGuide();
+  void refineChannelBreaks(channel);
 }
 async function appendBroadcastCoverage(channel, targetSeconds) {
   if (!channel || channel.error || !channel.shows?.some(show => show.episodes?.some(item => Number(item.durationSeconds) > 0))) return;
@@ -2494,7 +3660,7 @@ async function appendBroadcastCoverage(channel, targetSeconds) {
       channel.root,
       channel.shows.filter(show => show.enabled !== false && !channel.disabledShowPaths?.includes(show.path))
         .map(show => ({ path: show.path, name: show.name, episodes: show.episodes.map(item => ({ path: item.path, durationSeconds: item.durationSeconds })) })),
-      (channel.commercials || []).map(item => ({
+      channelCommercials(channel).map(item => ({
         path: item.path,
         durationSeconds: item.durationSeconds,
         channelClipId: item.channelClipId,
@@ -2505,6 +3671,7 @@ async function appendBroadcastCoverage(channel, targetSeconds) {
     );
     if (!channels.includes(channel)) return;
     appendBroadcastQueue(channel, generated);
+    void refineChannelBreaks(channel);
     if (generated.totalDurationSeconds < remainingSeconds && generated.roundsAdded >= 1000) {
       channel.error = 'The broadcast schedule is too large to catch up in one pass.';
       renderChannels();
@@ -2533,7 +3700,78 @@ async function initializeChannelBroadcast(channel, { force = false } = {}) {
   try { await pending; }
   finally { if (channel.broadcastInitPromise === pending) channel.broadcastInitPromise = null; }
 }
+// Damaged or truncated files (neither Chromium nor FFmpeg can read them) are skipped instead of leaving the channel stuck on
+// LOADING. They are remembered by size and date for a day, so a re-downloaded or repaired file is tried again.
+const UNPLAYABLE_CHANNEL_MEDIA_KEY = 'saturdayTube.unplayableChannelMedia.v1';
+const UNPLAYABLE_RETRY_MS = 24 * 60 * 60 * 1000;
+const CHANNEL_LOAD_STALL_MS = 15000;
+const MAX_UNPLAYABLE_SKIPS_PER_TUNE = 40;
+let unplayableChannelMedia = {};
+try { unplayableChannelMedia = JSON.parse(localStorage.getItem(UNPLAYABLE_CHANNEL_MEDIA_KEY) || '{}') || {}; } catch { unplayableChannelMedia = {}; }
+let unplayableSkipCount = { tuneToken: -1, count: 0 };
+function channelMediaIdentity(item) { return `${Number(item?.size) || 0}:${Number(item?.modified) || 0}`; }
+function isUnplayableChannelMedia(item) {
+  const entry = item?.path ? unplayableChannelMedia[item.path] : null;
+  return Boolean(entry) && entry.identity === channelMediaIdentity(item) && Date.now() - (Number(entry.at) || 0) < UNPLAYABLE_RETRY_MS;
+}
+function markUnplayableChannelMedia(item) {
+  if (!item?.path) return;
+  unplayableChannelMedia[item.path] = { identity: channelMediaIdentity(item), at: Date.now() };
+  for (const [key, entry] of Object.entries(unplayableChannelMedia)) {
+    if (Date.now() - (Number(entry?.at) || 0) >= UNPLAYABLE_RETRY_MS) delete unplayableChannelMedia[key];
+  }
+  try { localStorage.setItem(UNPLAYABLE_CHANNEL_MEDIA_KEY, JSON.stringify(unplayableChannelMedia)); } catch { /* Skipping still works this session. */ }
+}
+// Moves the broadcast clock past an unreadable segment: a programme skips all of its parts (and the breaks between them),
+// a commercial skips just that spot.
+function skipUnplayableChannelSegment(channel, position, expectedTuneToken = channelTuneToken) {
+  if (!channel?.broadcast || !position) return false;
+  if (unplayableSkipCount.tuneToken !== expectedTuneToken) unplayableSkipCount = { tuneToken: expectedTuneToken, count: 0 };
+  unplayableSkipCount.count += 1;
+  if (unplayableSkipCount.count > MAX_UNPLAYABLE_SKIPS_PER_TUNE) {
+    setTVSearching(false);
+    setStatus('NO PLAYABLE PROGRAMMES ON THIS CHANNEL');
+    return false;
+  }
+  const broken = position.segment;
+  const isProgramme = broken.segmentType === 'program';
+  let seconds = position.startSeconds;
+  let target = -1;
+  for (let index = position.index; index < channel.queue.length; index += 1) {
+    const item = channel.queue[index];
+    if (index > position.index && !isUnplayableChannelMedia(item)
+      && (isProgramme ? item.segmentType === 'program' && item.path !== broken.path : true)) {
+      target = index;
+      break;
+    }
+    seconds += Math.max(0, Number(item.durationSeconds) || 0);
+  }
+  const skipSeconds = Math.max(0.5, seconds - (position.startSeconds + position.offsetSeconds));
+  // initialOffsetSeconds moves the clock whether it is running or held for a restore.
+  channel.broadcast.initialOffsetSeconds = (Number(channel.broadcast.initialOffsetSeconds) || 0) + skipSeconds;
+  console.warn(`Skipping unplayable ${isProgramme ? 'programme' : 'commercial'} ${broken.path} (${Math.round(skipSeconds)} s)${target < 0 ? '; waiting for more schedule' : ''}`);
+  setStatus(isProgramme ? 'PROGRAMME UNAVAILABLE · SKIPPING AHEAD' : 'SKIPPING DAMAGED COMMERCIAL');
+  setTVSearching(true);
+  window.setTimeout(() => {
+    if (expectedTuneToken === channelTuneToken && selectedInput === 'tv' && activeChannelId === channel.id) syncActiveBroadcast(true, expectedTuneToken);
+  }, 0);
+  return true;
+}
+function failCurrentChannelSegment() {
+  if (selectedInput !== 'tv' || !isCurrentChannelPlayback()) return false;
+  const channel = activeChannel();
+  const segment = channel?.queue?.[currentIndex];
+  if (!segment) return false;
+  markUnplayableChannelMedia(segment);
+  const position = locateChannelSegment(channel, broadcastElapsed(channel));
+  if (!position || position.segment.path !== segment.path) {
+    syncActiveBroadcast(true, channelTuneToken);
+    return true;
+  }
+  return skipUnplayableChannelSegment(channel, position, channelTuneToken);
+}
 function syncActiveBroadcast(forceTune = false, expectedTuneToken = channelTuneToken) {
+  if (window.SaturdayIntermission?.active) return;
   const channel = activeChannel();
   if (!channel || selectedInput !== 'tv' || channel.error || !channel.broadcast || expectedTuneToken !== channelTuneToken) return;
   let elapsed = broadcastElapsed(channel);
@@ -2566,13 +3804,20 @@ function syncActiveBroadcast(forceTune = false, expectedTuneToken = channelTuneT
     return;
   }
   if (expectedTuneToken !== channelTuneToken || selectedInput !== 'tv' || activeChannelId !== channel.id) return;
+  if (!forceTune && holdBroadcastForPlayingSegment(channel, position)) return;
+  position = locateChannelSegment(channel, broadcastElapsed(channel)) || position;
   position = pruneCompletedChannelQueue(channel, position);
   elapsed = broadcastElapsed(channel);
+  if (isUnplayableChannelMedia(position.segment)) {
+    skipUnplayableChannelSegment(channel, position, expectedTuneToken);
+    return;
+  }
   const current = channel.queue[currentIndex];
   const sameSegment = hasVideo && activePlaybackChannelId === channel.id && activePlaybackTuneToken === expectedTuneToken
     && activePlaybackPath === position.segment.path && current?.path === position.segment.path
     && current?.segmentType === position.segment.segmentType && current?.sequence === position.segment.sequence;
   if (forceTune || !sameSegment) {
+    void refineChannelBreaks(channel);
     channel.cursor = position.index;
     const sourceTimeSeconds = (Number(position.segment.sourceStartSeconds) || 0) + position.offsetSeconds;
     playTrack(position.index, {
@@ -2584,9 +3829,12 @@ function syncActiveBroadcast(forceTune = false, expectedTuneToken = channelTuneT
   } else {
     channel.cursor = position.index;
     const sourceTimeSeconds = (Number(position.segment.sourceStartSeconds) || 0) + position.offsetSeconds;
-    const drift = Math.abs((Number(video.currentTime) || 0) - sourceTimeSeconds);
-    if (!video.paused && drift > 3) video.currentTime = sourceTimeSeconds;
+    const delta = playbackSourceTime() - sourceTimeSeconds;
+    // Chasing wall time after a slow read starts another seek; let the actual picture set the broadcast clock instead.
+    if (Math.abs(delta) > 0.05 && channelPlaybackOnAir(channel)) shiftBroadcastClock(channel, delta);
   }
+  prepareUpcomingChannelAudio(channel, position);
+  if (channelPlaybackReadyForWarmup(channel)) prewarmAdjacentChannels();
   if (channel.broadcast.totalDurationSeconds - elapsed < 180) void appendBroadcastCoverage(channel, elapsed + 60);
 }
 function needsChannelTranscode(track) {
@@ -2596,36 +3844,148 @@ function channelPlaybackSource(track) {
   const compatible = channelAudioCompatibleMedia.get(track?.path);
   return compatible?.url ? { ...track, id: compatible.id, url: compatible.url } : track;
 }
+// Chromium plays the picture of files whose audio it cannot decode (AC-3, E-AC-3, DTS, TrueHD, PCM in MP4, MP2, WMA…) but stays
+// silent, so anything outside the codecs it reliably decodes gets a cached copy with AAC audio (H.264 video is copied).
+const CHANNEL_AUDIO_CHECK_EXTENSIONS = /\.(?:mkv|mp4|m4v|mov|webm|flv|avi|mpg|mpeg|ts|wmv)$/i;
+const BROWSER_SAFE_AUDIO_CODECS = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac']);
+const AUDIO_PROBE_RETRY_MS = 5 * 60 * 1000;
+const channelAudioCodecVerified = new Set();
+const mediaWithoutAudio = new Set();
+const channelAudioCompatibilityFailures = new Map();
+const channelAudioConversionStarted = new Set();
+function audioCodecNeedsConversion(codec) {
+  const name = String(codec || '').trim().toLowerCase();
+  return Boolean(name) && name !== 'none' && !BROWSER_SAFE_AUDIO_CODECS.has(name);
+}
+function ensureChannelAudioCompatible(track, priority = 'background') {
+  const sourcePath = String(track?.path || '');
+  if (!track?.id || !sourcePath || !CHANNEL_AUDIO_CHECK_EXTENSIONS.test(sourcePath)
+    || typeof window.tube.getMediaAudioCodec !== 'function' || channelAudioCodecVerified.has(sourcePath)) return Promise.resolve(null);
+  if (Date.now() - (channelAudioCompatibilityFailures.get(sourcePath) || -Infinity) < AUDIO_PROBE_RETRY_MS) return Promise.resolve(null);
+  if (channelAudioCompatibleMedia.has(sourcePath)) return Promise.resolve(channelAudioCompatibleMedia.get(sourcePath));
+  if (channelAudioCompatibilityJobs.has(sourcePath)) {
+    // A warm-up copy of what is now on screen jumps the conversion queue (main dedupes the job and starts it at once).
+    if (priority === 'foreground' && channelAudioConversionStarted.has(sourcePath)) {
+      window.tube.transcodeMedia(track.id, { priority: 'foreground' }).catch(() => {});
+    }
+    return channelAudioCompatibilityJobs.get(sourcePath);
+  }
+  const job = window.tube.getMediaAudioCodec(track.id).then(codec => {
+    if (!audioCodecNeedsConversion(codec)) {
+      // An unreadable probe ('') is not trusted as verified; the playback watchdog still checks that sound is decoding.
+      if (codec) channelAudioCodecVerified.add(sourcePath);
+      if (codec === 'none') mediaWithoutAudio.add(sourcePath);
+      return null;
+    }
+    channelAudioConversionStarted.add(sourcePath);
+    const onScreen = priority === 'foreground' || activePlaybackPath === sourcePath;
+    return window.tube.transcodeMedia(track.id, { priority: onScreen ? 'foreground' : 'background' });
+  }).then(converted => {
+    if (converted?.url) channelAudioCompatibleMedia.set(sourcePath, converted);
+    return converted?.url ? converted : null;
+  }).catch(error => {
+    channelAudioCompatibilityFailures.set(sourcePath, Date.now());
+    throw error;
+  }).finally(() => {
+    channelAudioConversionStarted.delete(sourcePath);
+    if (channelAudioCompatibilityJobs.get(sourcePath) === job) channelAudioCompatibilityJobs.delete(sourcePath);
+  });
+  channelAudioCompatibilityJobs.set(sourcePath, job);
+  return job;
+}
+// Swaps the playing file for its AAC copy at the same position (channel or tape), if the viewer is still on it.
+function switchToAudioCompatibleCopy(sourcePath, converted, generation, tuneToken, input) {
+  if (!converted?.url || generation !== playbackGeneration || selectedInput !== input || activePlaybackPath !== sourcePath
+    || activePlaybackUrl === converted.url) return false;
+  if (input === 'tv' && (tuneToken !== channelTuneToken || activePlaybackChannelId !== activeChannelId)) return false;
+  pendingPlaybackRestore = {
+    trackPath: sourcePath,
+    currentTime: Number.isFinite(video.currentTime) ? playbackSourceTime() : 0,
+    wasPlaying: !video.paused && !video.ended,
+    input
+  };
+  livePlayback = null;
+  switchingTracks = true;
+  fallbackAttempted = true;
+  activePlaybackUrl = converted.url;
+  video.src = converted.url;
+  video.load();
+  switchingTracks = false;
+  return true;
+}
 function prepareChannelAudioCompatibility(track) {
-  if (!track?.channelMedia || selectedInput !== 'tv' || !/\.mkv$/i.test(String(track.path || ''))
-    || !track.id || typeof window.tube.getMediaAudioCodec !== 'function'
-    || channelAudioCompatibleMedia.has(track.path) || channelAudioCompatibilityJobs.has(track.path)) return;
-  const sourcePath = track.path;
+  const input = selectedInput;
+  // A converted copy (fallbackAttempted) always carries AAC audio already.
+  if (!track?.path || fallbackAttempted || (input !== 'tv' && input !== 'video') || Boolean(track.channelMedia) !== (input === 'tv')) return;
+  // Channel audio is verified alongside native loading, or already arrives as live AAC.
+  if (input === 'tv') return;
   const generation = playbackGeneration;
   const tuneToken = channelTuneToken;
-  const job = window.tube.getMediaAudioCodec(track.id).then(codec => {
-    if (!['ac3', 'eac3', 'dts', 'truehd', 'mlp'].includes(String(codec || '').toLowerCase())) return null;
-    return window.tube.transcodeMedia(track.id);
-  }).then(converted => {
+  ensureChannelAudioCompatible(track, 'foreground')
+    .then(converted => switchToAudioCompatibleCopy(track.path, converted, generation, tuneToken, input))
+    .catch(error => console.warn('Audio compatibility copy was unavailable', error));
+}
+// Last-resort repair when the picture plays but no sound is being decoded: convert the file's audio regardless of the probe.
+const audioRepairAttempted = new Set();
+const AUDIO_REPAIR_RETRY_MS = 20000;
+function repairPlaybackAudio(track) {
+  const input = selectedInput;
+  const sourcePath = String(track?.path || '');
+  if (input === 'tv' && track?.channelMedia) {
+    if (!sourcePath || audioRepairAttempted.has(sourcePath)) return false;
+    audioRepairAttempted.add(sourcePath);
+    window.setTimeout(() => audioRepairAttempted.delete(sourcePath), AUDIO_REPAIR_RETRY_MS);
+    console.warn(`No audio is decoding for ${sourcePath}; restarting it as a live stream`);
+    return restartChannelPlaybackLive({ forceEncode: livePlayback?.mode === 'copy' });
+  }
+  if (!track?.id || !sourcePath || fallbackAttempted || audioRepairAttempted.has(sourcePath) || typeof window.tube.transcodeMedia !== 'function') return false;
+  audioRepairAttempted.add(sourcePath);
+  const generation = playbackGeneration;
+  const tuneToken = channelTuneToken;
+  console.warn(`No audio is decoding for ${sourcePath}; switching to a converted copy`);
+  setStatus('RESTORING SOUND');
+  window.tube.transcodeMedia(track.id).then(converted => {
     if (!converted?.url) return;
     channelAudioCompatibleMedia.set(sourcePath, converted);
-    if (generation !== playbackGeneration || tuneToken !== channelTuneToken || selectedInput !== 'tv'
-      || activePlaybackPath !== sourcePath || activePlaybackChannelId !== activeChannelId
-      || activePlaybackUrl === converted.url) return;
-    pendingPlaybackRestore = {
-      trackPath: sourcePath,
-      currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
-      wasPlaying: !video.paused && !video.ended,
-      input: 'tv'
-    };
-    switchingTracks = true;
-    activePlaybackUrl = converted.url;
-    video.src = converted.url;
-    video.load();
-    switchingTracks = false;
-  }).catch(error => console.warn('Channel audio compatibility copy was unavailable', error))
-    .finally(() => { if (channelAudioCompatibilityJobs.get(sourcePath) === job) channelAudioCompatibilityJobs.delete(sourcePath); });
-  channelAudioCompatibilityJobs.set(sourcePath, job);
+    channelAudioCodecVerified.delete(sourcePath);
+    switchToAudioCompatibleCopy(sourcePath, converted, generation, tuneToken, input);
+  }).catch(error => {
+    console.warn('Audio repair copy could not be made', error);
+    // Try again shortly (a busy drive or a killed job is not permanent); the watchdog re-arms once this clears.
+    window.setTimeout(() => {
+      audioRepairAttempted.delete(sourcePath);
+      if (activePlaybackPath === sourcePath) audioWatchdog.decodeOk = false;
+    }, AUDIO_REPAIR_RETRY_MS);
+  });
+  return true;
+}
+// Check the next programme's codecs only after the current picture has settled.
+const upcomingChannelMediaJobs = new Map();
+function channelPlaybackReadyForWarmup(channel) {
+  return channelPlaybackOnAir(channel) && channelStableSince > 0 && performance.now() - channelStableSince >= 5000
+    && !channels.some(item => item.scanning);
+}
+function prepareUpcomingChannelAudio(channel, position) {
+  if (!channel?.queue || !position || !channelPlaybackReadyForWarmup(channel)) return;
+  const seen = new Set([position.segment.path]);
+  for (let index = position.index + 1; index < channel.queue.length && seen.size < 2; index += 1) {
+    const item = channel.queue[index];
+    if (item.segmentType !== 'program' || seen.has(item.path)) continue;
+    seen.add(item.path);
+    if (typeof window.tube.openChannelMedia === 'function') {
+      if (upcomingChannelMediaJobs.has(item.path)) continue;
+      const generation = playbackGeneration;
+      const job = window.tube.openChannelMedia(item.id, 0, { prepareOnly: true })
+        .catch(error => {
+          if (generation === playbackGeneration) console.warn('Upcoming channel media could not be prepared', error);
+          window.setTimeout(() => {
+            if (upcomingChannelMediaJobs.get(item.path) === job) upcomingChannelMediaJobs.delete(item.path);
+          }, 60_000);
+        });
+      upcomingChannelMediaJobs.set(item.path, job);
+      while (upcomingChannelMediaJobs.size > 64) upcomingChannelMediaJobs.delete(upcomingChannelMediaJobs.keys().next().value);
+    }
+  }
 }
 async function prewarmChannelPlayback(channel, requestToken) {
   if (requestToken !== channelPrewarmToken || !channel.broadcast || !channel.queue?.length) return;
@@ -2634,16 +3994,21 @@ async function prewarmChannelPlayback(channel, requestToken) {
   const program = position.segment.segmentType === 'program'
     ? position.segment
     : channel.queue.slice(position.index + 1).find(item => item.segmentType === 'program');
-  if (!program?.id || !needsChannelTranscode(program)) return;
+  if (!program?.id) return;
+  const generation = playbackGeneration;
   try {
-    await window.tube.transcodeMedia(program.id);
+    // Only the file's codecs are looked up ahead of time; conversion happens live while it airs.
+    if (typeof window.tube.openChannelMedia === 'function') await window.tube.openChannelMedia(program.id, 0, { prepareOnly: true });
   } catch (error) {
+    if (generation !== playbackGeneration) return;
     console.warn(`Channel media prewarm failed for ${channel.name}`, error);
   }
 }
 function prewarmAdjacentChannels() {
   const available = channels.filter(channel => channel.enabled !== false && channel.scanComplete && !channel.error);
-  if (!channelsStartupReady || available.length < 2) return;
+  if (!channelsStartupReady || available.length < 2 || channelPrewarmedGeneration === playbackGeneration
+    || (selectedInput === 'tv' && !channelPlaybackReadyForWarmup(activeChannel()))) return;
+  channelPrewarmedGeneration = playbackGeneration;
   const currentIndex = available.findIndex(channel => channel.id === activeChannelId);
   if (currentIndex < 0) return;
   const neighbors = [];
@@ -2686,6 +4051,7 @@ function prewarmAdjacentChannels() {
   });
 }
 function startActiveChannel() {
+  const streaming = activeYoutubeStarter();
   const channel = activeChannel();
   const tuneToken = channelTuneToken;
   if (selectedInput === 'tv' && (!hasVideo || video.paused)) setTVSearching(true);
@@ -2694,6 +4060,23 @@ function startActiveChannel() {
     setStatus('PREPARING TV CHANNELS');
     return;
   }
+  if (streaming) {
+    const youtube = window.SaturdayTubeYouTubePlayer;
+    if (!youtube) {
+      setTVSearching(false);
+      setStatus('YOUTUBE PLAYER IS NOT AVAILABLE');
+      return;
+    }
+    if (youtube.isStarted(streaming.id)) return;
+    setTVSearching(true);
+    void youtube.start(streaming, message => {
+      setStatus(message);
+      if (!String(message).startsWith('LOADING')) setTVSearching(false);
+      setMasterVolume();
+    });
+    return;
+  }
+  window.SaturdayTubeYouTubePlayer?.stop();
   if (!channel) {
     clearChannelVideoForInputChange();
     setTVSearching(false);
@@ -2716,7 +4099,7 @@ function startActiveChannel() {
   if (channel.scanning || !channel.scanComplete) {
     setTVSearching(true);
     setStatus(channel.scanning ? `SCANNING ${channel.name.toUpperCase()}…` : `TUNING ${channel.name.toUpperCase()}…`);
-    if (!channel.scanning) void scanChannel(channel);
+    if (!channel.scanning) prioritizeActiveChannelScan();
     return;
   }
   if (!channel.broadcast) {
@@ -2741,7 +4124,7 @@ function startActiveChannel() {
   syncActiveBroadcast(true, tuneToken);
   prewarmAdjacentChannels();
 }
-async function scanChannel(channel) {
+async function scanChannel(channel, { force = false } = {}) {
   if (channel.scanPromise) return channel.scanPromise;
   const pending = (async () => {
     channel.scanning = true;
@@ -2750,7 +4133,7 @@ async function scanChannel(channel) {
     let savedPlaybackState = channelPlaybackSnapshot(channel) || channel.savedPlaybackState || null;
     try {
       const restoredRoot = await window.tube.restoreChannelFolder(channel.root);
-      const scanned = await window.tube.rescanChannelFolder(restoredRoot);
+      const scanned = await window.tube.rescanChannelFolder(restoredRoot, { force });
       savedPlaybackState = channelPlaybackSnapshot(channel) || channel.savedPlaybackState || savedPlaybackState;
       const nextShows = (scanned.shows || []).map(show => ({ ...show, enabled: !channel.disabledShowPaths?.includes(show.path) }));
       const nextCommercials = scanned.commercials || [];
@@ -2764,10 +4147,11 @@ async function scanChannel(channel) {
       channel.showCount = scanned.showCount || 0;
       channel.episodeCount = scanned.episodeCount || 0;
       channel.commercialCount = scanned.commercialCount || 0;
+      channel.playlistCached = scanned.fromCache === true;
       if (savedPlaybackState) {
         const restored = await window.tube.reconcileChannelPlayback(
           channel.shows.filter(show => show.enabled !== false && !channel.disabledShowPaths?.includes(show.path)),
-          channel.commercials,
+          channelCommercials(channel),
           { ...savedPlaybackState, rotation: savedPlaybackState.rotation || channel.rotation || {} }
         );
         channel.queue = restored.queue || [];
@@ -2793,6 +4177,8 @@ async function scanChannel(channel) {
           && show.episodes?.some(item => Number(item.durationSeconds) > 0))) {
           await appendBroadcastCoverage(channel, restored.elapsedSeconds || 0);
         }
+        await fillChannelCommercialBreaks(channel);
+        void refineChannelBreaks(channel);
       } else {
         channel.rotation = channel.rotation && typeof channel.rotation === 'object' ? channel.rotation : {};
         channel.queue = [];
@@ -2820,10 +4206,11 @@ async function scanChannel(channel) {
     } finally {
       channel.scanning = false;
       channel.scanComplete = true;
+      if (channelsStartupReady) releaseChannelRestore(channel);
       renderChannels();
       if (tvGuideDialog.open) {
         renderTVGuide();
-        if (channels[tvGuidePageIndex]?.id === channel.id) void ensureGuideSchedule(channel);
+        if (currentGuideChannel()?.id === channel.id) void ensureGuideSchedule(channel);
       }
       if (channelsStartupReady && selectedInput === 'tv' && activeChannelId === channel.id) {
         if (channel.broadcast) syncActiveBroadcast(false, channelTuneToken);
@@ -2837,9 +4224,14 @@ async function scanChannel(channel) {
 }
 
 function clearChannelVideoForInputChange() {
+  window.SaturdayTubeYouTubePlayer?.stop();
+  channelStableSince = 0;
+  channelLoadPhase = 'TUNING...';
   playbackGeneration += 1;
   activePlaybackGeneration = -1;
   activePlaybackUrl = '';
+  livePlayback = null;
+  setPlayingAuthenticTape(false);
   activePlaybackChannelId = '';
   activePlaybackTuneToken = -1;
   activePlaybackPath = '';
@@ -2880,6 +4272,7 @@ async function restoreManualVideoSession() {
   playTrack(index, { trackPath: saved.trackPath, currentTime: Math.max(0, Number(saved.currentTime) || 0), wasPlaying: saved.wasPlaying === true, input: 'video' });
 }
 async function loadChannels() {
+  renderYoutubeStarterSetup();
   channelsStartupReady = false;
   if (selectedInput === 'tv') setTVSearching(true);
   let raw = [];
@@ -2888,9 +4281,7 @@ async function loadChannels() {
   channels = raw.filter(item => item && typeof item.id === 'string' && typeof item.root === 'string').map(item => ({
     id: item.id,
     name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : 'TV Channel',
-    abbreviation: typeof item.abbreviation === 'string' && item.abbreviation.trim()
-      ? item.abbreviation.trim().slice(0, 6).toLocaleUpperCase('en-US')
-      : makeChannelAbbreviation(typeof item.name === 'string' && item.name.trim() ? item.name.trim() : 'TV Channel', item.root),
+    abbreviation: makeChannelAbbreviation(typeof item.name === 'string' && item.name.trim() ? item.name.trim() : 'TV Channel', item.root),
     root: item.root,
     movieOnly: item.movieOnly === true,
     rotation: item.playbackState?.rotation && typeof item.playbackState.rotation === 'object'
@@ -2902,51 +4293,217 @@ async function loadChannels() {
     nextProgrammeSequence: Math.max(0, Number(item.playbackState?.nextProgrammeSequence) || 0),
     enabled: item.enabled !== false,
     disabledShowPaths: Array.isArray(item.disabledShowPaths) ? item.disabledShowPaths.filter(value => typeof value === 'string') : [],
+    adFree: item.adFree === true,
+    restorePending: true,
     queue: [], cursor: 0, broadcast: null, shows: [], commercials: [], showCount: 0, episodeCount: 0, commercialCount: 0, error: '', scanning: false, scanComplete: false, scanPromise: null
   }));
   const savedActive = localStorage.getItem('saturdayTube.activeChannel.v1');
   activeChannelId = channels.some(item => item.id === savedActive) ? savedActive : channels[0]?.id || '';
   renderChannels();
-  try {
-    const discovered = await window.tube.discoverSiblingChannels(channels.map(channel => channel.root));
-    for (const folder of discovered || []) {
-      if (!folder?.root || channels.some(channel => channel.root === folder.root)) continue;
-      channels.push({
-        id: `channel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        name: folder.name || 'TV Channel',
-        abbreviation: makeChannelAbbreviation(folder.name || 'TV Channel', folder.root),
-        root: folder.root,
-        rotation: {}, savedPlaybackState: null, playHistory: {}, lastPlayedSequence: null,
-        nextSequence: 0, nextProgrammeSequence: 0, enabled: true, disabledShowPaths: [],
-        queue: [], cursor: 0, broadcast: null, shows: [], commercials: [],
-        showCount: 0, episodeCount: 0, commercialCount: 0, error: '', scanning: false, scanComplete: false, scanPromise: null
-      });
-    }
-    if (discovered?.length) {
-      channels.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
-      persistChannels();
-      renderChannels();
-    }
-  } catch (error) {
-    console.warn('TV channel siblings could not be discovered', error);
-  }
+  await discoverNewChannels();
   const firstEnabled = channels.find(item => item.enabled !== false);
   if (!activeChannel() || activeChannel().enabled === false) activeChannelId = firstEnabled?.id || '';
   const startupOrder = [activeChannel(), ...channels.filter(item => item.id !== activeChannelId)].filter(Boolean);
-  for (const channel of startupOrder) await scanChannel(channel);
-  channelsStartupReady = channels.every(channel => channel.scanComplete);
-  const playable = channels.filter(channel => channel.enabled !== false && !channel.error
-    && channel.queue?.some(item => item.segmentType === 'program'));
-  if (!playable.some(channel => channel.id === activeChannelId)) activeChannelId = playable[0]?.id || '';
+  // Only wait for the first playable channel; everything else keeps warming in the background.
+  let firstPlayable = null;
+  for (const channel of startupOrder) {
+    if (channel.enabled === false) continue;
+    await scanChannel(channel);
+    releaseChannelRestore(channel);
+    if (isPlayableChannel(channel)) { firstPlayable = channel; break; }
+  }
+  channelsStartupReady = true;
+  if (!isPlayableChannel(activeChannel())) activeChannelId = firstPlayable?.id || activeChannelId;
+  const firstRunKey = 'saturdayTube.publicStarterModeInitialized.v1';
+  const firstRunPublicMode = !HAD_SAVED_CONTROL_PREFERENCES && channels.length === 0 && !localStorage.getItem(firstRunKey);
+  if (firstRunPublicMode && configuredYoutubeStarters().length) {
+    activeYoutubeStarterId = configuredYoutubeStarters()[0].id;
+    try {
+      localStorage.setItem(YOUTUBE_ACTIVE_KEY, activeYoutubeStarterId);
+      localStorage.setItem(firstRunKey, '1');
+    } catch { /* A fresh install can still tune the first starter for this session. */ }
+    setInputSource('tv', false);
+  }
   persistChannels();
   renderChannels();
   if (selectedInput === 'tv') {
-    if (activeChannel() && playable.some(channel => channel.id === activeChannelId)) void startActiveChannel();
+    if (activeYoutubeStarter() || isPlayableChannel(activeChannel())) void startActiveChannel();
     else {
       setTVSearching(false);
       setStatus(activeChannel()?.error ? 'TV CHANNEL SCAN FAILED · CHECK DRIVE' : 'NO PLAYABLE TV CHANNEL FOUND');
     }
   }
+  void warmChannelsInBackground();
+}
+function isPlayableChannel(channel) {
+  return Boolean(channel && channel.enabled !== false && !channel.error && channel.queue?.some(item => item.segmentType === 'program'));
+}
+function releaseChannelRestore(channel) {
+  if (!channel?.restorePending) return;
+  if (channel.broadcast) channel.broadcast.startedAtMs = Date.now();
+  channel.restorePending = false;
+}
+function prioritizeActiveChannelScan() {
+  // One tuned channel may jump ahead of the ordered warm-up; channels surfed past are left for the warm-up queue.
+  if (channelPriorityScanPromise) return;
+  const channel = activeChannel();
+  if (!channel || channel.scanComplete || channel.scanning) return;
+  channelPriorityScanPromise = scanChannel(channel).finally(() => {
+    channelPriorityScanPromise = null;
+    if (selectedInput === 'tv') prioritizeActiveChannelScan();
+  });
+}
+function warmChannelsInBackground() {
+  if (channelWarmupPromise) return channelWarmupPromise;
+  channelWarmupPromise = (async () => {
+    // Scan in channel order whatever is on screen (TV or VHS) so every channel is ready before it is surfed to.
+    let next;
+    while ((next = channels.find(channel => !channel.scanComplete))) {
+      await scanChannel(next);
+      releaseChannelRestore(next);
+    }
+  })().catch(error => console.warn('Background channel warm-up stopped', error)).finally(() => {
+    channelWarmupPromise = null;
+    renderChannels();
+    if (selectedInput === 'tv' && isPlayableChannel(activeChannel())) prewarmAdjacentChannels();
+  });
+  return channelWarmupPromise;
+}
+function savedChannelSource() {
+  const saved = localStorage.getItem(CHANNEL_SOURCE_KEY) || '';
+  if (saved) return saved;
+  // Older setups never saved a source; adopt the shared TV-Channels parent so new folders still appear.
+  const parent = channels.map(channel => String(channel.root).replace(/[\\/][^\\/]+[\\/]?$/, ''))
+    .find(folder => /[\\/]tv-channels$/i.test(folder));
+  if (parent) localStorage.setItem(CHANNEL_SOURCE_KEY, parent);
+  return parent || '';
+}
+// "9_Disney" is Disney placed ninth on the dial; the number only orders channels and is never part of the name.
+const CHANNEL_ORDER_PREFIX = /^\s*(\d+)\s*[_.)-]\s*/;
+function channelFolderName(root) {
+  const folder = String(root || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop().trim();
+  return folder.replace(CHANNEL_ORDER_PREFIX, '').trim() || folder;
+}
+function channelFolderOrder(root) {
+  const match = String(root || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop().match(CHANNEL_ORDER_PREFIX);
+  return match ? Number(match[1]) : Infinity;
+}
+function sortChannelsByDial() {
+  const before = channels.map(channel => channel.id).join('|');
+  channels.sort((a, b) => (channelFolderOrder(a.root) - channelFolderOrder(b.root))
+    || channelFolderName(a.root).localeCompare(channelFolderName(b.root), undefined, { numeric: true, sensitivity: 'base' }));
+  return channels.map(channel => channel.id).join('|') !== before;
+}
+function channelFolderKey(root) {
+  return channelFolderName(root).toLocaleLowerCase('en-US');
+}
+function remapChannelPaths(value, oldRoot, newRoot) {
+  const prefix = `${String(oldRoot).replace(/[\\/]+$/, '')}/`;
+  const remap = text => (typeof text === 'string' && text.startsWith(prefix) ? `${String(newRoot).replace(/[\\/]+$/, '')}/${text.slice(prefix.length)}` : text);
+  if (Array.isArray(value)) return value.map(item => remapChannelPaths(item, oldRoot, newRoot));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [remap(key), remapChannelPaths(item, oldRoot, newRoot)]));
+  }
+  return remap(value);
+}
+// A renamed folder keeps its channel: saved playback, history and hidden shows follow the files to the new path.
+function adoptRenamedChannelFolder(channel, root) {
+  const oldRoot = channel.root;
+  const snapshot = channel.broadcast ? channelPlaybackSnapshot(channel) : channel.savedPlaybackState;
+  channel.savedPlaybackState = snapshot ? remapChannelPaths(snapshot, oldRoot, root) : null;
+  channel.playHistory = remapChannelPaths(channel.playHistory || {}, oldRoot, root);
+  channel.rotation = remapChannelPaths(channel.rotation || {}, oldRoot, root);
+  channel.disabledShowPaths = remapChannelPaths(channel.disabledShowPaths || [], oldRoot, root);
+  if (channel.broadcast) {
+    channel.queue = [];
+    channel.broadcast = null;
+  }
+  channel.root = root;
+}
+function insideChannelSource(root, source = localStorage.getItem(CHANNEL_SOURCE_KEY) || '') {
+  return Boolean(source) && String(root || '').startsWith(`${source.replace(/[\\/]+$/, '')}/`);
+}
+// A channel whose folder moved into the source keeps its id and playback; a stale copy outside the source is dropped.
+function reconcileMovedChannels() {
+  const source = localStorage.getItem(CHANNEL_SOURCE_KEY) || '';
+  if (!source) return false;
+  const inSource = new Set(channels.filter(channel => insideChannelSource(channel.root, source)).map(channel => channelFolderKey(channel.root)));
+  const stale = channels.filter(channel => !insideChannelSource(channel.root, source) && inSource.has(channelFolderKey(channel.root)));
+  if (!stale.length) return false;
+  for (const channel of stale) {
+    const replacement = channels.find(item => item !== channel && insideChannelSource(item.root, source)
+      && channelFolderKey(item.root) === channelFolderKey(channel.root));
+    if (activeChannelId === channel.id && replacement) activeChannelId = replacement.id;
+  }
+  channels = channels.filter(channel => !stale.includes(channel));
+  return true;
+}
+function appendDiscoveredChannels(folders) {
+  const added = [];
+  let moved = false;
+  for (const folder of folders || []) {
+    if (!folder?.root || channels.some(channel => channel.root === folder.root)) continue;
+    const renamed = folder.renamedFrom ? channels.find(channel => channel.root === folder.renamedFrom) : null;
+    const previous = renamed || (insideChannelSource(folder.root)
+      ? channels.find(channel => !insideChannelSource(channel.root) && channelFolderKey(channel.root) === channelFolderKey(folder.root))
+      : null);
+    if (previous) {
+      adoptRenamedChannelFolder(previous, folder.root);
+      previous.root = folder.root;
+      previous.name = folder.name || previous.name;
+      previous.error = '';
+      previous.scanComplete = false;
+      added.push(previous);
+      moved = true;
+      continue;
+    }
+    const channel = {
+      id: `channel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: folder.name || 'TV Channel',
+      abbreviation: makeChannelAbbreviation(folder.name || 'TV Channel', folder.root),
+      root: folder.root,
+      rotation: {}, savedPlaybackState: null, playHistory: {}, lastPlayedSequence: null,
+      nextSequence: 0, nextProgrammeSequence: 0, enabled: true, disabledShowPaths: [],
+      queue: [], cursor: 0, broadcast: null, shows: [], commercials: [],
+      showCount: 0, episodeCount: 0, commercialCount: 0, error: '', scanning: false, scanComplete: false, scanPromise: null
+    };
+    channels.push(channel);
+    added.push(channel);
+  }
+  if (reconcileMovedChannels()) moved = true;
+  if (sortChannelsByDial()) moved = true;
+  if (added.length || moved) {
+    persistChannels();
+    renderChannels();
+  }
+  return added;
+}
+async function discoverNewChannels() {
+  try {
+    return appendDiscoveredChannels(await window.tube.discoverSiblingChannels(channels.map(channel => channel.root), savedChannelSource()));
+  } catch (error) {
+    console.warn('TV channel folders could not be discovered', error);
+    return [];
+  }
+}
+async function chooseChannelSource() {
+  channelSetupNotice = '';
+  chooseChannelSourceButton.disabled = true;
+  channelStatus.textContent = 'CHOOSE SOURCE FOLDER…';
+  try {
+    const source = await window.tube.chooseChannelSource();
+    if (!source) return;
+    localStorage.setItem(CHANNEL_SOURCE_KEY, source.root);
+    const added = appendDiscoveredChannels(source.channels);
+    if (!source.channels?.length) channelSetupNotice = 'No channel folders found inside that folder.';
+    if (!activeChannel() && added[0]) activeChannelId = added[0].id;
+    for (const channel of added) await scanChannel(channel);
+    persistChannels();
+    if (selectedInput === 'tv' && added.some(channel => channel.id === activeChannelId)) await startActiveChannel();
+  } catch (error) {
+    console.warn('TV channel source could not be read', error);
+    channelSetupNotice = userFacingChannelError(error, true);
+  } finally { chooseChannelSourceButton.disabled = false; renderChannels(); }
 }
 async function addChannelFolder() {
   channelSetupNotice = '';
@@ -2993,24 +4550,151 @@ async function addChannelFolder() {
     channelSetupNotice = userFacingChannelError(error, true);
   } finally { addChannelButton.disabled = false; renderChannels(); }
 }
-async function rescanActiveChannel() {
+// Puts a channel's not-yet-aired programmes back at the front of their shows' episode lists and drops its schedule, so the
+// next scan builds a fresh one (new show order, new break points) without skipping an episode. A part-aired one replays.
+function unwrapChannelSchedule(channel) {
+  const position = channel?.broadcast ? locateChannelSegment(channel, broadcastElapsed(channel)) : null;
+  const rotation = channel.rotation && typeof channel.rotation === 'object' ? channel.rotation : {};
+  const bags = { ...(rotation.episodeBags || {}) };
+  const returned = {};
+  for (const item of (channel.queue || []).slice(position ? position.index : 0)) {
+    if (item?.segmentType !== 'program' || typeof item.showPath !== 'string' || typeof item.path !== 'string') continue;
+    const paths = returned[item.showPath] ||= [];
+    if (!paths.includes(item.path)) paths.push(item.path);
+  }
+  for (const [showPath, paths] of Object.entries(returned)) {
+    bags[showPath] = [...paths, ...(Array.isArray(bags[showPath]) ? bags[showPath] : []).filter(filePath => !paths.includes(filePath))];
+  }
+  channel.rotation = { ...rotation, episodeBags: bags };
+  channel.queue = [];
+  channel.cursor = 0;
+  channel.broadcast = null;
+  channel.savedPlaybackState = null;
+}
+async function shuffleAllChannels() {
+  if (!channelsStartupReady || !channels.length || channelRefreshPromise
+    || channels.some(channel => channel.adFreeUpdating || channel.guideEditPromise)) return;
+  const ordered = [activeChannel(), ...channels.filter(channel => channel.id !== activeChannelId)].filter(Boolean);
+  channelRefreshPromise = (async () => {
+    // Let the shared refresh lock be assigned before rendering or starting any queue work.
+    await Promise.resolve();
+    let completed = 0;
+    const failed = [];
+    for (const [index, channel] of ordered.entries()) {
+      if (!channels.includes(channel)) continue;
+      channelShuffleStatus = `SHUFFLING ${index + 1} / ${ordered.length} · ${channel.name.toUpperCase()}`;
+      renderChannels();
+      renderTVGuide();
+      try {
+        if (channel.scanPromise) await channel.scanPromise;
+        if (!channel.scanComplete) await scanChannel(channel);
+        if (channel.error) throw new Error(channel.error);
+        if (channel.guideSchedulePromise) await channel.guideSchedulePromise;
+        if (channel.broadcastInitPromise) await channel.broadcastInitPromise;
+        if (channel.broadcast?.queuePromise) await channel.broadcast.queuePromise;
+        if (selectedInput === 'tv' && activeChannelId === channel.id) {
+          channelTuneToken += 1;
+          clearChannelVideoForInputChange();
+          setTVSearching(true);
+        }
+        resetChannelShuffle(channel);
+        await initializeChannelBroadcast(channel);
+        if (channel.error) throw new Error(channel.error);
+        releaseChannelRestore(channel);
+        persistChannels();
+        completed += 1;
+      } catch (error) {
+        failed.push(channel.name);
+        console.error(`Channel shuffle failed for ${channel.name}`, error);
+      } finally {
+        if (selectedInput === 'tv' && activeChannelId === channel.id) startActiveChannel();
+      }
+    }
+    channelShuffleStatus = failed.length
+      ? `SHUFFLED ${completed} / ${ordered.length} · FAILED: ${failed.join(', ')} · CHECK CHANNELS AND RETRY`
+      : `SHUFFLED ${completed} CHANNEL${completed === 1 ? '' : 'S'} + COMMERCIALS`;
+    setStatus(channelShuffleStatus);
+  })().catch(error => {
+    console.error('TV channel shuffle stopped', error);
+    channelShuffleStatus = 'SHUFFLE FAILED · TRY AGAIN';
+    setStatus(channelShuffleStatus);
+  }).finally(() => {
+    channelRefreshPromise = null;
+    renderChannels();
+    renderTVGuide();
+  });
+  return channelRefreshPromise;
+}
+async function rescanActiveChannel({ reshuffle = false } = {}) {
   const channel = activeChannel();
-  if (!channel || !channelsStartupReady) return;
+  if (!channel || !channelsStartupReady || channelRefreshPromise) return;
   rescanChannelButton.disabled = true;
-  await scanChannel(channel);
+  channelRefreshPromise = (async () => {
+    // Refresh is the only full rebuild of saved playlists; startup reuses them while the folders are unchanged.
+    // Each channel is rewrapped from its folder in turn, keeping every show's place in its episodes.
+    for (const added of await discoverNewChannels()) await scanChannel(added, { force: true });
+    if (channel.scanPromise) await channel.scanPromise;
+    if (reshuffle) resetChannelShuffle(channel);
+    else unwrapChannelSchedule(channel);
+    await scanChannel(channel, { force: true });
+    for (const other of channels.filter(item => item.id !== channel.id && item.enabled !== false)) {
+      if (other.scanPromise) await other.scanPromise;
+      if (reshuffle) resetChannelShuffle(other);
+      else unwrapChannelSchedule(other);
+      await scanChannel(other, { force: true });
+      releaseChannelRestore(other);
+    }
+  })().catch(error => console.warn('TV channel refresh stopped', error)).finally(() => {
+    channelRefreshPromise = null;
+    rescanChannelButton.disabled = false;
+    renderChannels();
+  });
+  return channelRefreshPromise;
+}
+function resetChannelShuffle(channel) {
+  const first = channel.queue?.find(item => item.segmentType === 'program');
+  unwrapChannelSchedule(channel);
+  channel.rotation = {
+    lastShowPath: first?.showPath || '',
+    episodeOrderVersion: 'season-episode-v1',
+    lastEpisodeByShow: first?.showPath && first?.path ? { [first.showPath]: first.path } : {}
+  };
+  channel.playHistory = {};
+  channel.lastPlayedSequence = null;
+  channel.nextSequence = 0;
+  channel.nextProgrammeSequence = 0;
 }
 function makeChannelAbbreviation(name, root = '') {
-  const identity = `${name || ''} ${root || ''}`.toLocaleLowerCase('en-US');
-  if (/comedy\s*central/.test(identity)) return 'CMDY';
-  if (/(?:^|[\\/\s])hbo(?:$|[\\/\s])/.test(identity)) return 'HBO';
-  if (/(?:^|[\\/\s])00s(?:$|[\\/\s])|2000s/.test(identity)) return '00s';
-  if (/(?:^|[\\/\s])90s(?:$|[\\/\s])|1990s/.test(identity)) return '90s';
-  if (/nickelodeon|(?:^|[\\/\s])nick(?:$|[\\/\s])/.test(identity)) return 'NICK';
-  if (/(?:^|[\\/\s])666(?:$|[\\/\s])/.test(identity)) return '666';
-  const words = String(name || '').match(/[a-z0-9]+/ig) || [];
-  const meaningful = words.filter(word => !['the', 'a', 'an'].includes(word.toLocaleLowerCase('en-US')));
+  // Only the channel's own folder name counts; parent folders and the dial-order number must not leak into the label.
+  const folder = (root ? channelFolderName(root) : '') || String(name || '');
+  const identity = folder.toLocaleLowerCase('en-US').replace(/[\s._-]+/g, ' ').trim();
+  if (/^comedy ?central$/.test(identity)) return 'CMDY';
+  if (/^hbo ?(kids|family)$/.test(identity)) return 'HBOK';
+  if (/^hbo$/.test(identity)) return 'HBO';
+  if (/^(00s|2000s)$/.test(identity)) return '00s';
+  if (/^(90s|1990s)$/.test(identity)) return '90s';
+  if (/^nick ?jr$/.test(identity)) return 'NKJR';
+  if (/^(nickelodeon|nick)$/.test(identity)) return 'NICK';
+  if (/^666$/.test(identity)) return '666';
+  if (/^cartoon ?network$/.test(identity)) return 'CN';
+  if (/^disney( channel)?$/.test(identity)) return 'DSNY';
+  if (/^(studio )?ghibli$/.test(identity)) return 'GHBL';
+  if (/^mtv$/.test(identity)) return 'MTV';
+  if (/^vh ?1$/.test(identity)) return 'VH1';
+  const words = identity.match(/[a-z0-9]+/ig) || [];
+  const meaningful = words.filter(word => !['the', 'a', 'an'].includes(word));
   if (meaningful.length > 1) return meaningful.map(word => word[0]).join('').slice(0, 5).toLocaleUpperCase('en-US');
   return (meaningful[0] || 'TV').slice(0, 4).toLocaleUpperCase('en-US');
+}
+function assignChannelAbbreviations() {
+  const used = new Set();
+  for (const channel of channels) {
+    const base = makeChannelAbbreviation(channel.name, channel.root);
+    let label = base;
+    for (let suffix = 2; used.has(label); suffix += 1) label = `${base.slice(0, 5 - String(suffix).length)}${suffix}`;
+    used.add(label);
+    channel.abbreviation = label;
+  }
 }
 function channelSurfAbbreviation(channel) {
   return channel?.abbreviation || makeChannelAbbreviation(channel?.name || 'CHANNEL', channel?.root || '');
@@ -3023,10 +4707,18 @@ function userFacingChannelError(error, adding = false) {
     : 'This folder could not be opened. Rescan it or choose another.';
 }
 function showChannelSurfOverlay(channel) {
-  if (!channelSurfOverlay || !channel) return;
-  channelSurfOverlay.textContent = channelSurfAbbreviation(channel);
+  if (!channel) return;
+  // The number sits after the name on the right-aligned readout, so it stays put while names change length.
+  showChannelSurfText(`${channelSurfAbbreviation(channel)} ${channelDialNumber(channel)}`);
+}
+function showChannelSurfText(text, holdMs = 1900) {
+  if (!channelSurfOverlay) return;
+  channelSurfOverlay.textContent = text;
   channelSurfOverlay.hidden = false;
+  channelSurfShownAt = performance.now();
+  channelSurfHoldMs = holdMs;
   channelSurfOverlay.classList.remove('surf-in');
+  channelSurfOverlay.style.animationDuration = `${holdMs}ms`;
   void channelSurfOverlay.offsetWidth;
   channelSurfOverlay.classList.add('surf-in');
   if (channelSurfOverlayTimer) window.clearTimeout(channelSurfOverlayTimer);
@@ -3034,16 +4726,23 @@ function showChannelSurfOverlay(channel) {
     channelSurfOverlay.hidden = true;
     channelSurfOverlay.classList.remove('surf-in');
     channelSurfOverlayTimer = null;
-  }, 1900);
+  }, holdMs);
 }
 function selectActiveChannel(id) {
-  if (!channelsStartupReady || !channels.some(channel => channel.id === id && channel.enabled !== false && channel.scanComplete && !channel.error)) return;
-  const changed = activeChannelId !== id;
+  if (!channelsStartupReady || !channels.some(channel => channel.id === id && channel.enabled !== false && !channel.error)) return;
+  const wasStreaming = Boolean(activeYoutubeStarter());
+  const changed = activeChannelId !== id || wasStreaming;
   if (selectedInput === 'tv') {
-    saveChannelPlaybackState();
+    if (!wasStreaming) saveChannelPlaybackState();
     window.dispatchEvent(new Event('saturdayTube-channel-change'));
   }
   if (changed) channelTuneToken += 1;
+  if (changed) {
+    const previous = currentChannelSelectionKey();
+    if (previous) previousChannelId = previous;
+  }
+  activeYoutubeStarterId = '';
+  try { localStorage.setItem(YOUTUBE_ACTIVE_KEY, ''); } catch { /* Selection remains valid for this session. */ }
   activeChannelId = id;
   if (changed && selectedInput === 'tv') {
     activeChannelTuneMetric = {
@@ -3057,6 +4756,7 @@ function selectActiveChannel(id) {
   }
   persistChannels();
   renderChannels();
+  syncBypassControls();
   showChannelSurfOverlay(activeChannel());
   if (selectedInput === 'tv') {
     if (changed) clearChannelVideoForInputChange();
@@ -3066,19 +4766,23 @@ function selectActiveChannel(id) {
 }
 function cycleActiveChannel(direction) {
   if (!channelsStartupReady) return;
-  const available = channels.filter(channel => channel.enabled !== false && channel.scanComplete && !channel.error);
-  if (!available.length) return;
-  const current = available.findIndex(channel => channel.id === activeChannelId);
+  const lineup = [
+    ...channels.filter(channel => channel.enabled !== false && !channel.error).map(channel => ({ kind: 'local', id: channel.id })),
+    ...configuredYoutubeStarters().map(starter => ({ kind: 'youtube', id: starter.id }))
+  ];
+  if (!lineup.length) return;
+  const currentKey = currentChannelSelectionKey();
+  const current = lineup.findIndex(item => `${item.kind}:${item.id}` === currentKey);
   const nextIndex = current < 0
-    ? (direction > 0 ? 0 : available.length - 1)
-    : (current + direction + available.length) % available.length;
-  const nextChannelId = available[nextIndex].id;
-  if (selectedInput !== 'tv') {
-    selectActiveChannel(nextChannelId);
-    setInputSource('tv');
+    ? (direction > 0 ? 0 : lineup.length - 1)
+    : (current + direction + lineup.length) % lineup.length;
+  const next = lineup[nextIndex];
+  if (next.kind === 'youtube') {
+    selectYoutubeStarter(next.id);
     return;
   }
-  selectActiveChannel(nextChannelId);
+  selectActiveChannel(next.id);
+  if (selectedInput !== 'tv') setInputSource('tv');
 }
 function persistPlaylists() {
   try {
@@ -3159,40 +4863,37 @@ function renderPlaylist() {
     }
   }
 }
-function fileExtensionForTrack(track) {
-  for (const source of [track?.path, track?.title]) {
-    if (typeof source !== 'string' || !source) continue;
-    const fileName = source.split(/[?#]/, 1)[0].split(/[\\/]/).pop() || '';
-    const match = /\.([a-z0-9]{1,8})$/i.exec(fileName);
-    if (match) return match[1].toUpperCase();
+let trackpadPoint = null;
+const trackpadCursor = document.createElement('div');
+trackpadCursor.id = 'trackpadCursor';
+trackpadCursor.setAttribute('popover', 'manual');
+trackpadCursor.setAttribute('aria-hidden', 'true');
+trackpadCursor.innerHTML = '<svg viewBox="0 0 24 28"><path d="M2 2v22l6-6 4 9 4-2-4-8h9Z"/></svg>';
+document.body.append(trackpadCursor);
+function showTrackpadCursor(value) {
+  trackpadPoint = { x: value.x, y: value.y };
+  trackpadCursor.style.left = `${value.x}px`;
+  trackpadCursor.style.top = `${value.y}px`;
+  document.body.classList.add('remote-trackpad-active');
+  if (trackpadCursor.matches(':popover-open')) trackpadCursor.hidePopover();
+  trackpadCursor.showPopover();
+  showPlaybackCursor();
+}
+function showPlaybackCursor(event) {
+  if (event?.pointerType && event.pointerType !== 'mouse') return;
+  if (event && trackpadPoint && (Math.abs(event.clientX - trackpadPoint.x) > 1 || Math.abs(event.clientY - trackpadPoint.y) > 1)) {
+    trackpadPoint = null;
+    trackpadCursor.hidePopover();
+    document.body.classList.remove('remote-trackpad-active');
   }
-  return '';
-}
-function hideFileExtension() {
-  if (extensionTimer) clearTimeout(extensionTimer);
-  extensionTimer = null;
-  visibleFileExtension = '';
-}
-function showPlaybackCursor() {
   if (cursorTimer) clearTimeout(cursorTimer);
   cursorTimer = null;
   document.body.classList.remove('cursor-idle');
-  if (!hasVideo || video.paused || libraryDialog.open) return;
   cursorTimer = setTimeout(() => {
-    if (hasVideo && !video.paused && !libraryDialog.open) document.body.classList.add('cursor-idle');
+    cursorTimer = null;
+    document.body.classList.add('cursor-idle');
+    trackpadCursor.hidePopover();
   }, 1200);
-}
-function clearPlaybackCursor() {
-  if (cursorTimer) clearTimeout(cursorTimer);
-  cursorTimer = null;
-  document.body.classList.remove('cursor-idle');
-}
-function showFileExtension() {
-  const extension = fileExtensionForTrack(activePlaylist()?.tracks[currentIndex]);
-  if (!extension) { hideFileExtension(); return; }
-  if (extensionTimer) clearTimeout(extensionTimer);
-  visibleFileExtension = extension;
-  extensionTimer = setTimeout(hideFileExtension, 2000);
 }
 function findNextPlayableTrack(startIndex) {
   const list = activePlaylist();
@@ -3250,8 +4951,6 @@ function shutOffPicture() {
   playSoundEffect('crtCutoff');
   shuttingOff = true;
   syncLoopingSoundEffects();
-  clearPlaybackCursor();
-  hideFileExtension();
   lastCompositePaused = null;
   stage.classList.add('shutting-off');
   setStatus('FINISHED');
@@ -3265,9 +4964,7 @@ function clearPlayback() {
   pendingPlaybackRestore = null;
   try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage can be unavailable in a restricted session. */ }
   video.pause();
-  clearPlaybackCursor();
   shuttingOff = false;
-  hideFileExtension();
   stage.classList.remove('shutting-off');
   lastCompositePaused = null;
   lastUploadedTime = -1;
@@ -3284,7 +4981,7 @@ function clearPlayback() {
   const showLanding = startupIntroActive && selectedInput !== 'tv';
   stage.classList.toggle('empty', showLanding);
   document.querySelector('#emptyState').hidden = !showLanding;
-  titleEl.textContent = showLanding ? 'Saturday morning starts here' : '';
+  titleEl.textContent = showLanding ? '' : '';
   seek.value = '0';
   currentTimeEl.textContent = '0:00';
   durationEl.textContent = '0:00';
@@ -3293,6 +4990,8 @@ function clearPlayback() {
   playbackGeneration += 1;
   activePlaybackGeneration = -1;
   activePlaybackUrl = '';
+  livePlayback = null;
+  setPlayingAuthenticTape(false);
   activePlaybackChannelId = '';
   activePlaybackTuneToken = -1;
   activePlaybackPath = '';
@@ -3322,10 +5021,15 @@ function ensureLocalTapeOnce(sourcePath) {
   job.then(clearJob, clearJob);
   return job;
 }
-function beginTrackPlayback(index, restoreSession = null, trackOverride = null) {
+function beginTrackPlayback(index, restoreSession = null, trackOverride = null, sourceOptions = {}) {
+  if (window.SaturdayIntermission?.active) return;
   const list = activePlaylist();
-  const track = trackOverride || list?.tracks[index];
+  let track = trackOverride || list?.tracks[index];
   if (!track || track.unavailable || !track.url) return;
+  channelStableSince = 0;
+  window.tube.setPlaybackPriority?.(true);
+  if (!track.channelMedia && !trackOverride) track = channelPlaybackSource(track);
+  const usingConvertedCopy = Boolean(track.path) && channelAudioCompatibleMedia.get(track.path)?.url === track.url;
   if (selectedInput === 'static') { resumeVideoAfterStatic = false; setInputSource('video', false); }
   pendingPlaybackRestore = restoreSession;
   switchingTracks = true;
@@ -3336,22 +5040,21 @@ function beginTrackPlayback(index, restoreSession = null, trackOverride = null) 
   caption.textContent = '';
   video.pause();
   shuttingOff = false;
-  hideFileExtension();
   stage.classList.remove('shutting-off');
   lastCompositePaused = null;
   lastUploadedTime = -1;
   lastRenderedSource = null;
   hasVideo = true;
   currentIndex = index;
-  fallbackAttempted = false;
+  fallbackAttempted = usingConvertedCopy;
   playbackGeneration += 1;
   activePlaybackGeneration = playbackGeneration;
   activePlaybackUrl = track.url;
   activePlaybackChannelId = track.channelMedia === true && selectedInput === 'tv' ? activeChannelId : '';
   activePlaybackTuneToken = activePlaybackChannelId ? channelTuneToken : -1;
   activePlaybackPath = track.path || '';
-  video.src = track.url;
-  video.load();
+  setPlayingAuthenticTape(isAuthenticTapeTrack(track));
+  loadPlaybackSource(track, restoreSession, sourceOptions);
   titleEl.textContent = track.title;
   stage.classList.remove('empty');
   document.querySelector('#emptyState').hidden = true;
@@ -3362,6 +5065,85 @@ function beginTrackPlayback(index, restoreSession = null, trackOverride = null) 
   document.querySelector('#deckState').textContent = 'LOADING TAPE';
   setStatus('LOADING CARTOON');
   renderPlaylist();
+}
+function attachPlaybackUrl(url, generation) {
+  if (window.SaturdayIntermission?.active && intermissionPlayback) {
+    intermissionPlayback.deferredSource = { url, generation };
+    return;
+  }
+  activePlaybackUrl = url;
+  video.src = url;
+  video.load();
+  watchChannelLoad(generation);
+}
+// Channel programmes Chromium can't play as they are stream through a live conversion; everything else loads directly.
+function loadPlaybackSource(track, restoreSession, sourceOptions = {}) {
+  livePlayback = null;
+  const generation = playbackGeneration;
+  if (track.channelMedia !== true || !activePlaybackChannelId || typeof window.tube.openChannelMedia !== 'function') {
+    attachPlaybackUrl(track.url, generation);
+    return;
+  }
+  const startSeconds = Math.max(0, Number(restoreSession?.currentTime) || 0);
+  channelLoadPhase = needsChannelTranscode(track) || sourceOptions.forceLive ? 'READING VIDEO FORMAT...' : 'LOADING VIDEO...';
+  window.tube.openChannelMedia(track.id, startSeconds, sourceOptions).then(plan => {
+    if (generation !== playbackGeneration) return;
+    if (plan?.audio === 'none') mediaWithoutAudio.add(track.path);
+    else if (plan?.audio) mediaWithoutAudio.delete(track.path);
+    if (plan?.live && plan.url) {
+      channelLoadPhase = 'STARTING LIVE VIDEO...';
+      livePlayback = { path: track.path, baseSeconds: Math.max(0, Number(plan.startSeconds) || 0), mode: plan.mode, options: sourceOptions };
+      attachPlaybackUrl(plan.url, generation);
+    } else {
+      channelLoadPhase = 'LOADING VIDEO...';
+      attachPlaybackUrl(plan?.url || track.url, generation);
+      if (plan?.verifyAudio) verifyNativeChannelAudio(track, generation);
+    }
+  }).catch(error => {
+    if (generation !== playbackGeneration) return;
+    console.warn('Channel media could not be prepared; loading it directly', error);
+    attachPlaybackUrl(track.url, generation);
+  });
+}
+function verifyNativeChannelAudio(track, generation) {
+  if (channelAudioCompatibilityJobs.has(track.path)) return;
+  const job = window.tube.getMediaAudioCodec(track.id).then(codec => {
+    if (codec) channelAudioCodecVerified.add(track.path);
+    if (codec === 'none') mediaWithoutAudio.add(track.path);
+    else if (codec) mediaWithoutAudio.delete(track.path);
+    if (generation === playbackGeneration && activePlaybackPath === track.path && audioCodecNeedsConversion(codec)) {
+      restartChannelPlaybackLive();
+    }
+  }).catch(error => {
+    if (generation !== playbackGeneration || error.name === 'AbortError') return;
+    channelAudioCompatibilityFailures.set(track.path, Date.now());
+    console.warn('Channel audio check could not read the file; playback watchdog remains active', error);
+  }).finally(() => {
+    if (channelAudioCompatibilityJobs.get(track.path) === job) channelAudioCompatibilityJobs.delete(track.path);
+  });
+  channelAudioCompatibilityJobs.set(track.path, job);
+}
+// Restarts the programme on screen as a live stream from where the picture is (or was meant to start). Copied pictures
+// fall back to a full re-encode; repeated failures on one file give up so the channel moves on.
+const LIVE_RESTART_WINDOW_MS = 2 * 60 * 1000;
+const MAX_LIVE_RESTARTS = 3;
+const liveRestarts = new Map();
+function restartChannelPlaybackLive({ forceEncode = false, sourceSeconds = null } = {}) {
+  if (selectedInput !== 'tv' || !isCurrentChannelPlayback()) return false;
+  const track = activePlaylist()?.tracks[currentIndex];
+  if (!track?.id || !track.path || typeof window.tube.openChannelMedia !== 'function') return false;
+  const now = Date.now();
+  const history = (liveRestarts.get(track.path) || []).filter(time => now - time < LIVE_RESTART_WINDOW_MS);
+  if (history.length >= MAX_LIVE_RESTARTS) return false;
+  history.push(now);
+  liveRestarts.set(track.path, history);
+  const from = Number.isFinite(sourceSeconds) ? sourceSeconds
+    : video.readyState >= 1 ? playbackSourceTime()
+    : Number(pendingPlaybackRestore?.currentTime) || (livePlayback?.baseSeconds ?? 0);
+  console.warn(`Restarting ${track.path} as a live ${forceEncode ? 'converted' : ''} stream at ${from.toFixed(1)} s`);
+  beginTrackPlayback(currentIndex, { trackPath: track.path, currentTime: Math.max(0, from), wasPlaying: true, input: 'tv' }, track,
+    { forceLive: true, forceEncode });
+  return true;
 }
 function playTrack(index, restoreSession = null) {
   if (!moviePrerollState) window.saturdayTubeMoviePrerollActive = false;
@@ -3605,20 +5387,63 @@ function setDialValue(dial, value) {
   dial.style.setProperty('--knob-angle', `${-135 + ((clamped - min) / (max - min)) * 270}deg`);
   dial.style.setProperty('--dial-percent', `${((clamped - min) / (max - min)) * 100}`);
   document.querySelector(`#${dial.id}Readout`).textContent = dialReadoutText(dial, clamped);
+  if (dial === brightnessDial) applyTvBacklight(clamped);
   if (dial === videoDial) {
     document.querySelector('#volumeArrowReadout').textContent = dialReadoutText(dial, clamped);
     document.querySelector('#volumeDownButton').disabled = clamped <= 0;
     document.querySelector('#volumeUpButton').disabled = clamped >= 100;
   }
 }
-function adjustMasterVolume(direction) {
+function adjustTracking(direction) {
+  const before = dialValue(vhsScanDial);
+  setDialValue(vhsScanDial, before + Math.sign(direction) * 5);
+  if (dialValue(vhsScanDial) !== before) saveControlPreferences();
+}
+function showVolumeOverlay() {
+  if (!volumeOverlay) return;
+  const level = Math.round(dialValue(videoDial));
+  const bar = volumeOverlay.querySelector('.volume-bar');
+  if (bar.childElementCount !== 40) bar.replaceChildren(...Array.from({ length: 40 }, () => document.createElement('i')));
+  [...bar.children].forEach((tick, index) => tick.classList.toggle('on', index < Math.round(level * 0.4)));
+  bar.style.setProperty('--level', String(level / 100));
+  volumeOverlay.querySelector('.volume-value').textContent = String(level);
+  volumeOverlay.hidden = false;
+  if (volumeOverlayTimer) window.clearTimeout(volumeOverlayTimer);
+  volumeOverlayTimer = window.setTimeout(() => { volumeOverlay.hidden = true; volumeOverlayTimer = null; }, 2000);
+}
+function syncMuteOverlay() {
+  if (muteOverlay) muteOverlay.hidden = mutedVolume === null;
+}
+function setMuted(muted) {
+  if (muted === (mutedVolume !== null)) return;
+  if (muted) {
+    mutedVolume = dialValue(videoDial) || 50;
+    setDialValue(videoDial, 0);
+  } else {
+    setDialValue(videoDial, mutedVolume);
+    mutedVolume = null;
+  }
+  setMasterVolume();
+  saveControlPreferences();
+  syncMuteOverlay();
+  if (!muted) showVolumeOverlay();
+}
+function toggleMute() {
+  setMuted(mutedVolume === null);
+}
+function adjustMasterVolume(direction, step = 5) {
+  // Like a real set, a volume key while muted brings the sound back at its old level first.
+  if (mutedVolume !== null) { setMuted(false); return; }
   const before = dialValue(videoDial);
-  setDialValue(videoDial, before + Math.sign(direction) * 5);
+  setDialValue(videoDial, before + Math.sign(direction) * step);
+  showVolumeOverlay();
   if (dialValue(videoDial) === before) return;
   setMasterVolume();
   saveControlPreferences();
 }
+const dialChangeHandlers = new Map();
 function bindRotaryDial(dial, onChange = () => {}) {
+  dialChangeHandlers.set(dial, onChange);
   let drag = null;
   const min = Number(dial.getAttribute('aria-valuemin'));
   const max = Number(dial.getAttribute('aria-valuemax'));
@@ -3690,6 +5515,7 @@ function updateDial(dial) {
   dial.setAttribute('aria-valuenow', String(Math.round(value)));
   dial.setAttribute('aria-valuetext', dialValueText(dial, value));
   document.querySelector(`#${dial.id}Readout`).textContent = dialReadoutText(dial, value);
+  if (dial === brightnessDial) applyTvBacklight(value);
   if (dial === videoDial) {
     document.querySelector('#volumeArrowReadout').textContent = dialReadoutText(dial, value);
     document.querySelector('#volumeDownButton').disabled = value <= 0;
@@ -3703,15 +5529,124 @@ async function toggleFullscreen(target) {
   } catch (error) { setStatus('FULLSCREEN NOT AVAILABLE'); console.error(error); }
 }
 let nativeWindowFullscreen = false;
+let backdropDim = false;
+const VIEW_MODE_KEY = 'saturdayTube.viewMode.v1';
+let savedViewMode = 'off';
+try { savedViewMode = localStorage.getItem(VIEW_MODE_KEY) || 'off'; }
+catch (error) { console.warn('View mode could not be restored', error); }
+async function setBackdropDim(enabled) {
+  backdropDim = enabled === true;
+  try { if (typeof window.tube.setBackdropDim === 'function') backdropDim = await window.tube.setBackdropDim(backdropDim); }
+  catch (error) { console.warn('Dim-room backdrop is unavailable', error); }
+}
 async function toggleNativeWindowFullscreen() {
   try {
-    nativeWindowFullscreen = await window.tube.toggleWindowFullscreen();
+    if (backdropDim) await setBackdropDim(false);
+    if (window.SaturdayScenes.active) {
+      window.SaturdayScenes.exit();
+      nativeWindowFullscreen = await window.tube.setWindowFullscreen(true);
+    } else nativeWindowFullscreen = await window.tube.toggleWindowFullscreen();
     syncFullscreenButtonState();
   } catch (error) { setStatus('FULLSCREEN NOT AVAILABLE'); console.error(error); }
 }
 function syncFullscreenButtonState() {
-  document.querySelector('#screenOnlyButton').setAttribute('aria-pressed', String(document.fullscreenElement === stage));
-  document.querySelector('#tvFullscreenButton').setAttribute('aria-pressed', String(nativeWindowFullscreen || document.fullscreenElement === tvSet));
+  try { localStorage.setItem(VIEW_MODE_KEY, fullscreenMode()); }
+  catch (error) { console.warn('View mode could not be saved', error); }
+  document.querySelector('#screenOnlyButton').setAttribute('aria-pressed', String(document.fullscreenElement === stage || document.body.classList.contains('screen-fill')));
+  document.querySelector('#tvFullscreenButton').setAttribute('aria-pressed', String(fullscreenMode() === 'tv'));
+  document.querySelector('#dimRoomButton').setAttribute('aria-pressed', String(fullscreenMode() === 'dim'));
+  document.querySelector('#sceneModeButton').setAttribute('aria-pressed', String(fullscreenMode() === 'scene'));
+  reportRemoteState();
+}
+function fullscreenMode() {
+  if (window.SaturdayScenes.active) return 'scene';
+  if (document.fullscreenElement === stage || document.body.classList.contains('screen-fill')) return 'screen';
+  if (nativeWindowFullscreen || document.fullscreenElement) return 'tv';
+  return backdropDim ? 'dim' : 'off';
+}
+async function restoreViewMode() {
+  try {
+    if (savedViewMode === 'scene') await enterSceneFullscreen();
+    else if (savedViewMode === 'dim') await setBackdropDim(true);
+    else if (savedViewMode === 'tv' || savedViewMode === 'screen') {
+      document.body.classList.toggle('screen-fill', savedViewMode === 'screen');
+      nativeWindowFullscreen = await window.tube.setWindowFullscreen(true);
+    }
+    syncFullscreenButtonState();
+  } catch (error) {
+    setStatus('SAVED VIEW COULD NOT BE RESTORED');
+    console.error('Saved view mode could not be restored', error);
+  }
+}
+// Remote and ⌘F cycle: window → picture filling the screen → whole TV filling the screen → TV in its window with the rest
+// of the desktop dimmed → virtual room → window. Fullscreen views use native window fullscreen (no user gesture needed) and the
+// screen-only step just lets the picture fill it, so stepping between them is instant.
+let fullscreenTransition = false;
+async function enterSceneFullscreen() {
+  document.body.classList.remove('screen-fill');
+  if (document.fullscreenElement) await document.exitFullscreen();
+  if (backdropDim) await setBackdropDim(false);
+  nativeWindowFullscreen = await window.tube.setWindowFullscreen(true);
+  try { await window.SaturdayScenes.enter(); }
+  catch (error) {
+    nativeWindowFullscreen = await window.tube.setWindowFullscreen(false);
+    throw error;
+  }
+}
+async function changeRoom() {
+  if (fullscreenTransition) return;
+  fullscreenTransition = true;
+  try {
+    if (window.SaturdayScenes.active) await window.SaturdayScenes.next();
+    else await enterSceneFullscreen();
+    syncFullscreenButtonState();
+  } catch (error) {
+    setStatus('ROOM NOT AVAILABLE');
+    console.error('Remote room selection failed', error);
+  } finally { fullscreenTransition = false; }
+}
+async function cycleFullscreen() {
+  if (fullscreenTransition) return;
+  fullscreenTransition = true;
+  try {
+    const mode = fullscreenMode();
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    if (mode === 'off') {
+      document.body.classList.add('screen-fill');
+      nativeWindowFullscreen = await window.tube.setWindowFullscreen(true);
+    } else if (mode === 'screen') {
+      document.body.classList.remove('screen-fill');
+      nativeWindowFullscreen = await window.tube.setWindowFullscreen(true);
+    } else if (mode === 'tv') {
+      document.body.classList.remove('screen-fill');
+      nativeWindowFullscreen = await window.tube.setWindowFullscreen(false);
+      // Main shows the sheet once the window has finished leaving fullscreen.
+      await setBackdropDim(true);
+    } else if (mode === 'dim') {
+      document.body.classList.remove('screen-fill');
+      await setBackdropDim(false);
+      await enterSceneFullscreen();
+    } else {
+      window.SaturdayScenes.exit();
+      nativeWindowFullscreen = await window.tube.setWindowFullscreen(false);
+    }
+  } catch (error) { setStatus('FULLSCREEN NOT AVAILABLE'); console.error(error); }
+  finally { fullscreenTransition = false; }
+  canvas.width = 0;
+  canvas.height = 0;
+  syncFullscreenButtonState();
+}
+async function exitFullscreenModes() {
+  try {
+    document.body.classList.remove('screen-fill');
+    window.SaturdayScenes.exit();
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    if (nativeWindowFullscreen) nativeWindowFullscreen = await window.tube.setWindowFullscreen(false);
+    if (backdropDim) await setBackdropDim(false);
+  } catch (error) { console.error(error); }
+  canvas.width = 0;
+  canvas.height = 0;
+  syncFullscreenButtonState();
 }
 
 playlistSelect.addEventListener('change', () => {
@@ -3760,7 +5695,10 @@ libraryAddButton.addEventListener('click', addLibrarySelection);
 libraryDialog.addEventListener('click', event => { if (event.target === libraryDialog) libraryDialog.close(); });
 document.querySelector('#subtitleButton').addEventListener('click', chooseSubtitle);
 playButton.addEventListener('click', () => {
-  if (selectedInput === 'tv') return;
+  if (selectedInput === 'tv') {
+    if (activeYoutubeStarter()) window.SaturdayTubeYouTubePlayer?.togglePlayback();
+    return;
+  }
   if (selectedInput === 'static') {
     const resume = resumeVideoAfterStatic;
     setInputSource('video');
@@ -3770,14 +5708,22 @@ playButton.addEventListener('click', () => {
   video.paused ? startVideoPlayback().catch(() => {}) : video.pause();
 });
 document.querySelector('#previousButton').addEventListener('click', () => {
-  if (selectedInput === 'tv') return;
+  if (selectedInput === 'tv') {
+    if (activeYoutubeStarter()) window.SaturdayTubeYouTubePlayer?.previous();
+    return;
+  }
   if (video.currentTime > 3) video.currentTime = 0;
   else stepTrack(-1);
 });
 document.querySelector('#nextButton').addEventListener('click', () => {
-  if (selectedInput !== 'tv') stepTrack(1);
+  if (selectedInput === 'tv') {
+    if (activeYoutubeStarter()) window.SaturdayTubeYouTubePlayer?.next();
+    return;
+  }
+  stepTrack(1);
 });
 video.addEventListener('play', () => {
+  if (window.SaturdayIntermission?.active) { video.pause(); return; }
   if (!isCurrentPlaybackEvent()) return;
   if (startupIntroActive) {
     startupIntroActive = false;
@@ -3789,8 +5735,6 @@ video.addEventListener('play', () => {
   video.muted = false;
   setMasterVolume();
   savePlaybackSession();
-  showFileExtension();
-  showPlaybackCursor();
   lastCompositePaused = null;
   if (audioContext && audioContext.state !== 'running') audioContext.resume().catch(error => console.warn('Playback audio context resume was deferred', error));
   playButton.textContent = 'Ⅱ PAUSE';
@@ -3805,6 +5749,7 @@ video.addEventListener('playing', () => {
   }
   if (isCurrentChannelPlayback()) {
     setTVSearching(false);
+    channelStableSince = performance.now();
     recordChannelPlayback(activeChannel(), activeChannel()?.queue?.[currentIndex]);
     recordChannelTuneMetric('playing');
     const metric = activeChannelTuneMetric;
@@ -3817,12 +5762,12 @@ video.addEventListener('playing', () => {
   }
 });
 video.addEventListener('waiting', () => {
+  channelStableSince = 0;
   if (isCurrentChannelPlayback()) setTVSearching(true, TV_SEARCHING_GRACE_MS);
 });
 video.addEventListener('pause', () => {
   if (!isCurrentPlaybackEvent()) return;
   if (!switchingTracks) savePlaybackSession();
-  clearPlaybackCursor();
   lastCompositePaused = null;
   playButton.textContent = '▶ PLAY';
   applyAudioEffect(false);
@@ -3831,6 +5776,79 @@ video.addEventListener('pause', () => {
 window.setInterval(() => {
   if (selectedInput === 'tv') void syncActiveBroadcast(false);
 }, 500);
+// The break fade also rides the picture loop, but animation frames stop while the window is minimised or covered; this keeps
+// the fade (which sets the volume) and the break cut moving so sound can never be left faded out.
+window.setInterval(updateChannelBreakFade, 100);
+// Audio watchdog: sound has to survive a suspended or sleeping output device, a stalled audio clock and files whose audio
+// Chromium silently cannot decode. Each check only acts when something is actually wrong.
+const AUDIO_WATCHDOG_MS = 1000;
+const AUDIO_SILENT_DECODE_TICKS = 4;
+const audioWatchdog = { contextTime: -1, stalledTicks: 0, decodeUrl: '', silentTicks: 0, decodeOk: false };
+function audioPlaybackExpected() {
+  return hasVideo && !video.paused && !video.ended && !video.seeking && video.readyState >= 3 && !shuttingOff && !switchingTracks
+    && (selectedInput === 'tv' || selectedInput === 'video');
+}
+function checkPlaybackAudio() {
+  if (!audioPlaybackExpected()) {
+    audioWatchdog.contextTime = -1;
+    audioWatchdog.stalledTicks = 0;
+    return;
+  }
+  // Volume and mute live on the dial and masterGain; the element itself must always be unmuted at full level.
+  if (video.muted || video.defaultMuted || (masterGain && video.volume !== 1)) setMasterVolume();
+  if (levelerGain && !Number.isFinite(levelerGain.gain.value)) {
+    levelerGain.gain.cancelScheduledValues(0);
+    levelerGain.gain.value = 1;
+    levelerPower = null;
+  }
+  if (masterGain && !Number.isFinite(masterGain.gain.value)) {
+    masterGain.gain.cancelScheduledValues(0);
+    setMasterVolume();
+  }
+  if (audioContext) {
+    if (audioContext.state !== 'running') {
+      audioWatchdog.contextTime = -1;
+      audioContext.resume().catch(error => console.warn('Audio watchdog could not resume playback audio', error));
+    } else {
+      const now = audioContext.currentTime;
+      audioWatchdog.stalledTicks = audioWatchdog.contextTime >= 0 && now - audioWatchdog.contextTime < 0.2 ? audioWatchdog.stalledTicks + 1 : 0;
+      audioWatchdog.contextTime = now;
+      // A frozen audio clock means the output device stopped taking sound: re-route, then fall back to the system default.
+      if (audioWatchdog.stalledTicks === 3) {
+        console.warn('Playback audio clock stalled; re-routing the output device');
+        void setAudioOutputDevice(activeAudioOutputId, false, false);
+      } else if (audioWatchdog.stalledTicks === 6) {
+        console.warn('Playback audio still stalled; using the system default output');
+        void setAudioOutputDevice('default', false, false).then(() => setStatus('AUDIO OUTPUT RESET · SYSTEM DEFAULT'));
+      } else if (audioWatchdog.stalledTicks >= 9) {
+        audioWatchdog.stalledTicks = 0;
+        audioContext.suspend().then(() => audioContext.resume()).catch(error => console.warn('Playback audio restart failed', error));
+      }
+    }
+  }
+  const decoded = video.webkitAudioDecodedByteCount;
+  if (typeof decoded !== 'number') return;
+  if (audioWatchdog.decodeUrl !== activePlaybackUrl) {
+    audioWatchdog.decodeUrl = activePlaybackUrl;
+    audioWatchdog.silentTicks = 0;
+    audioWatchdog.decodeOk = false;
+  }
+  if (audioWatchdog.decodeOk) return;
+  if (decoded > 0) {
+    audioWatchdog.decodeOk = true;
+    return;
+  }
+  if (!(video.webkitVideoDecodedByteCount > 0)) return;
+  const track = activePlaylist()?.tracks?.[currentIndex];
+  if (!track?.path || mediaWithoutAudio.has(track.path) || channelAudioCompatibilityJobs.has(track.path)) return;
+  audioWatchdog.silentTicks += 1;
+  // Picture decoding but not one byte of sound for several seconds: the file's audio is unplayable here, so convert it.
+  if (audioWatchdog.silentTicks >= AUDIO_SILENT_DECODE_TICKS) {
+    audioWatchdog.decodeOk = true;
+    repairPlaybackAudio(track);
+  }
+}
+window.setInterval(checkPlaybackAudio, AUDIO_WATCHDOG_MS);
 window.setInterval(() => {
   if (channels.length) saveChannelPlaybackState();
 }, CHANNEL_PLAYBACK_SAVE_INTERVAL_MS);
@@ -3852,6 +5870,13 @@ video.addEventListener('ended', () => {
   }
   if (selectedInput === 'tv' && activeChannel()) {
     const channel = activeChannel();
+    const playing = channel.queue?.[currentIndex];
+    if (livePlayback && playing?.path === activePlaybackPath) {
+      // A live conversion that stopped early (a read error, a damaged stretch) picks up again rather than skipping the rest.
+      const end = Math.min((Number(playing.sourceStartSeconds) || 0) + (Number(playing.durationSeconds) || 0),
+        Number(playing.mediaDurationSeconds) || Infinity);
+      if (playbackSourceTime() < end - 3 && restartChannelPlaybackLive({ forceEncode: livePlayback.mode !== 'encode' })) return;
+    }
     const position = locateChannelSegment(channel, broadcastElapsed(channel));
     if (position && position.index === currentIndex && channel.broadcast) {
       channel.broadcast.startedAtMs -= Math.max(0, position.segment.durationSeconds - position.offsetSeconds) * 1000;
@@ -3863,13 +5888,35 @@ video.addEventListener('ended', () => {
   if (nextIndex >= 0) playTrack(nextIndex);
   else shutOffPicture();
 });
-video.addEventListener('error', () => {
+// A file can sit at "no data" forever without raising an error (Chromium waiting on a damaged header), so a channel load
+// that has read nothing after 15 seconds is treated as a failure: first the converted copy, then a skip.
+function watchChannelLoad(generation) {
+  if (selectedInput !== 'tv' || !activePlaybackChannelId) return;
+  const url = activePlaybackUrl;
+  window.setTimeout(() => {
+    if (generation !== playbackGeneration || activePlaybackUrl !== url || !isCurrentChannelPlayback()) return;
+    if (video.readyState >= 2 || video.error) return;
+    console.warn(`Channel media produced no picture in ${CHANNEL_LOAD_STALL_MS / 1000} s: ${activePlaybackPath}`);
+    handlePlaybackFailure();
+  }, CHANNEL_LOAD_STALL_MS);
+}
+function handlePlaybackFailure() {
   if (!isCurrentPlaybackEvent()) return;
   switchingTracks = false;
   if (!hasVideo) return;
   const stopSearchingAfterFailure = () => { if (selectedInput === 'tv') setTVSearching(false); };
+  if (selectedInput === 'tv' && isCurrentChannelPlayback()) {
+    recordChannelTuneMetric(livePlayback ? 'live-error' : 'source-error');
+    const encodeNext = Boolean(livePlayback) && livePlayback.mode !== 'encode';
+    if ((!livePlayback || encodeNext) && restartChannelPlaybackLive({ forceEncode: encodeNext })) return;
+    if (failCurrentChannelSegment()) return;
+    setStatus('VIDEO COULD NOT PLAY');
+    stopSearchingAfterFailure();
+    return;
+  }
   if (fallbackAttempted) {
     if (selectedInput === 'tv') recordChannelTuneMetric('transcode-error');
+    if (failCurrentChannelSegment()) return;
     const nativeError = video.error;
     setStatus(nativeError?.code === 4 ? 'UNSUPPORTED OR DAMAGED VIDEO' : 'VIDEO COULD NOT PLAY');
     document.querySelector('#deckState').textContent = 'TAPE ERROR';
@@ -3879,6 +5926,7 @@ video.addEventListener('error', () => {
   const list = activePlaylist();
   const track = list?.tracks[currentIndex];
   if (!track?.id || !window.tube.transcodeMedia) {
+    if (failCurrentChannelSegment()) return;
     setStatus('VIDEO COULD NOT PLAY');
     document.querySelector('#deckState').textContent = 'TAPE ERROR';
     stopSearchingAfterFailure();
@@ -3897,15 +5945,19 @@ video.addEventListener('error', () => {
     video.src = converted.url;
     video.load();
     setStatus('TAPE RESTORED');
+    watchChannelLoad(generation);
   }).catch(error => {
     if (generation !== playbackGeneration) return;
     console.error('Video compatibility conversion failed', error);
     if (selectedInput === 'tv') recordChannelTuneMetric('transcode-error');
+    if (failCurrentChannelSegment()) return;
     setStatus(String(error?.message || 'VIDEO COULD NOT PLAY').slice(0, 70));
     document.querySelector('#deckState').textContent = 'TAPE ERROR';
     stopSearchingAfterFailure();
   });
-});
+}
+video.addEventListener('error', handlePlaybackFailure);
+
 video.addEventListener('loadedmetadata', () => {
   if (!isCurrentPlaybackEvent()) return;
   if (isCurrentChannelPlayback()) recordChannelTuneMetric('metadata');
@@ -3932,8 +5984,10 @@ video.addEventListener('loadedmetadata', () => {
   }
   if (moviePrerollMoviePath === activePlaylist()?.tracks[currentIndex]?.path) moviePrerollMoviePath = '';
   if (restore && restore.trackPath === activePlaylist()?.tracks[currentIndex]?.path) {
-    const end = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.05) : restore.currentTime;
-    video.currentTime = Math.min(restore.currentTime, end);
+    if (!livePlayback) {
+      const end = Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.05) : restore.currentTime;
+      video.currentTime = Math.min(restore.currentTime, end);
+    }
     if (restore.input === 'static') {
       setInputSource('static', false);
       resumeVideoAfterStatic = restore.wasPlaying;
@@ -3987,6 +6041,10 @@ audioOutputSelect.addEventListener('change', () => {
 });
 navigator.mediaDevices?.addEventListener?.('devicechange', () => { void refreshAudioOutputDevices(); });
 bindRotaryDial(videoDial, () => {
+  if (mutedVolume !== null && dialValue(videoDial) > 0) { mutedVolume = null; syncMuteOverlay(); }
+  showVolumeOverlay();
+  // Only the Web Audio path can amplify past 100%; turning the dial is a user gesture, so it may start it.
+  if (!audioContext && hasVideo && dialVolumeGain() > 1) ensureAudioGraph();
   setMasterVolume();
   saveControlPreferences();
 });
@@ -3994,6 +6052,8 @@ for (const dial of pictureDials) bindRotaryDial(dial, saveControlPreferences);
 bindRotaryDial(fxAmountDial, () => applyAudioEffect());
 setupSettingsOverlays();
 primeSoundEffects();
+setFinish(currentFinish, false);
+setCabinetSkin(cabinetSkin, false);
 restoreControlPreferences();
 refreshAudioOutputOptions(preferredAudioOutputId !== 'default');
 void refreshAudioOutputDevices();
@@ -4005,7 +6065,7 @@ window.tube.getStaticInput().then(media => {
   scheduleFrameLoop();
   if (selectedInput === 'static') startStaticPicture();
 }).catch(error => {
-  setStatus('TV STATIC INPUT UNAVAILABLE');
+  setStatus('SAT INPUT UNAVAILABLE');
   console.error('Bundled TV static clip could not be loaded', error);
 });
 resumeVideoAfterStatic = false;
@@ -4016,32 +6076,53 @@ if (selectedInput === 'tv') {
 } else {
   setInputSource(selectedInput, false);
 }
-startStartupSequence();
 for (const dial of allDials) updateDial(dial);
 setMasterVolume();
 audioEffectSelect.addEventListener('change', () => setAudioEffect(audioEffectSelect.value));
 finishButtons.forEach(button => button.addEventListener('click', () => setFinish(button.dataset.finish)));
 inputButton.addEventListener('click', () => {
-  const next = { video: 'static', static: 'tv', tv: 'video' }[selectedInput] || 'video';
+  const next = { video: 'static', static: 'tv', tv: 'aux', aux: 'video' }[selectedInput] || 'video';
   setInputSource(next);
+});
+auxLoadButton.addEventListener('click', () => { auxRomFile.value = ''; auxRomFile.click(); });
+auxRomFile.addEventListener('change', async () => {
+  const file = auxRomFile.files?.[0];
+  if (!file) return;
+  auxLoadButton.disabled = true;
+  auxLoadButton.textContent = 'LOADING GAME…';
+  try {
+    const game = await window.SaturdayGenesisAux.loadFile(file);
+    auxLoadButton.textContent = `LOAD ${game.title.toUpperCase()}…`;
+    titleEl.textContent = game.title;
+    setStatus(`GENESIS AUX LOADED · ${game.title}`);
+    reportRemoteState();
+  } catch (error) {
+    auxLoadButton.textContent = 'LOAD GENESIS GAME…';
+    setStatus(error instanceof Error ? error.message : String(error));
+  } finally {
+    auxLoadButton.disabled = false;
+    auxRomFile.value = '';
+  }
 });
 channelDownButton.addEventListener('click', () => cycleActiveChannel(-1));
 channelUpButton.addEventListener('click', () => cycleActiveChannel(1));
 document.querySelector('#volumeDownButton').addEventListener('click', () => adjustMasterVolume(-1));
 document.querySelector('#volumeUpButton').addEventListener('click', () => adjustMasterVolume(1));
+cabinetSkinSelect.addEventListener('change', () => setCabinetSkin(cabinetSkinSelect.value));
 addChannelButton.addEventListener('click', () => { void addChannelFolder(); });
-document.querySelector('#tvGuideButton').addEventListener('click', openTVGuide);
+chooseChannelSourceButton.addEventListener('click', () => { void chooseChannelSource(); });
 document.querySelector('#tvGuideClose').addEventListener('click', () => tvGuideDialog.close());
 tvGuideDialog.addEventListener('close', stopTVGuideRefresh);
-document.querySelector('#tvGuidePrevious').addEventListener('click', () => { tvGuidePageIndex = (tvGuidePageIndex - 1 + channels.length) % channels.length; renderTVGuide(); });
-document.querySelector('#tvGuideNext').addEventListener('click', () => { tvGuidePageIndex = (tvGuidePageIndex + 1) % channels.length; renderTVGuide(); });
+document.querySelector('#tvGuidePrevious').addEventListener('click', () => { const count = tvGuideLineup().length; if (count) { tvGuidePageIndex = (tvGuidePageIndex - 1 + count) % count; renderTVGuide(); } });
+document.querySelector('#tvGuideNext').addEventListener('click', () => { const count = tvGuideLineup().length; if (count) { tvGuidePageIndex = (tvGuidePageIndex + 1) % count; renderTVGuide(); } });
 document.querySelector('#tvGuideAdd').addEventListener('click', () => { stopTVGuideRefresh(); tvGuideDialog.close(); void addChannelFolder().then(openTVGuide); });
+document.querySelector('#tvGuideShuffle').addEventListener('click', () => { void shuffleAllChannels(); });
 document.querySelector('#tvSettingsButton').addEventListener('click', () => { selectSettingsTab('video'); showScreenDialog(tvSettingsDialog); });
 document.querySelector('#tvSettingsClose').addEventListener('click', () => tvSettingsDialog.close());
 document.querySelector('#tvSettingsCloseFooter').addEventListener('click', () => tvSettingsDialog.close());
 document.querySelector('#audioRcaButton').addEventListener('click', () => { selectSettingsTab('audio'); showScreenDialog(tvSettingsDialog); });
 for (const button of document.querySelectorAll('[data-settings-tab]')) button.addEventListener('click', () => selectSettingsTab(button.dataset.settingsTab));
-window.addEventListener('resize', () => { for (const dialog of [tvGuideDialog, tvSettingsDialog]) setScreenDialogBounds(dialog); });
+window.addEventListener('resize', () => { updateInterfaceScale(); for (const dialog of [tvGuideDialog, tvSettingsDialog]) setScreenDialogBounds(dialog); });
 rescanChannelButton.addEventListener('click', () => { void rescanActiveChannel(); });
 soundEffectsToggle.addEventListener('click', () => {
   soundEffectsEnabled = !soundEffectsEnabled;
@@ -4058,28 +6139,101 @@ document.addEventListener('click', event => {
   if (!button || button.classList.contains('dial')) return;
   playSoundEffect(button.id === 'openButton' ? 'vhsEject' : 'button');
 }, true);
-document.querySelector('#screenOnlyButton').addEventListener('click', () => toggleFullscreen(stage));
+document.querySelector('#screenOnlyButton').addEventListener('click', async () => {
+  window.SaturdayScenes.exit();
+  if (backdropDim) await setBackdropDim(false);
+  await toggleFullscreen(stage);
+});
+document.querySelector('#dimRoomButton').addEventListener('click', async () => {
+  const enable = fullscreenMode() !== 'dim';
+  if (enable) {
+    window.SaturdayScenes.exit();
+    document.body.classList.remove('screen-fill');
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    if (nativeWindowFullscreen) nativeWindowFullscreen = await window.tube.setWindowFullscreen(false).catch(() => nativeWindowFullscreen);
+  }
+  await setBackdropDim(enable);
+  syncFullscreenButtonState();
+});
+async function toggleSceneMode() {
+  if (fullscreenTransition) return;
+  fullscreenTransition = true;
+  try {
+    if (window.SaturdayScenes.active) await exitFullscreenModes();
+    else {
+      tvSettingsDialog.close();
+      await enterSceneFullscreen();
+    }
+  } catch (error) { setStatus('SCENE NOT AVAILABLE'); console.error(error); }
+  finally { fullscreenTransition = false; syncFullscreenButtonState(); }
+}
+document.querySelector('#sceneModeButton').addEventListener('click', toggleSceneMode);
+document.querySelector('#sceneEnter').addEventListener('click', toggleSceneMode);
+window.addEventListener('scene-open-settings', () => {
+  selectSettingsTab('scenes');
+  showScreenDialog(tvSettingsDialog);
+});
+window.addEventListener('scene-layout-change', () => {
+  setScreenDialogBounds(tvSettingsDialog);
+  setScreenDialogBounds(tvGuideDialog);
+});
+window.addEventListener('scene-image-error', () => setStatus('ROOM IMAGE UNAVAILABLE · SELECT ANOTHER SCENE'));
+window.tube.onFullscreenCycleRequest?.(() => { void cycleFullscreen(); });
+window.tube.onPictureVisibilityChange?.(visible => {
+  pictureVisible = visible;
+  if (visible) { lastPictureFrame = -Infinity; scheduleFrameLoop(); }
+  else pauseFrameLoop();
+});
 document.querySelector('#tvFullscreenButton').addEventListener('click', () => toggleNativeWindowFullscreen());
 document.addEventListener('fullscreenchange', () => {
   syncFullscreenButtonState();
   canvas.width = 0;
   canvas.height = 0;
 });
+let channelBreakRefreshTimer = null;
+window.tube.onChannelBreaksResolved?.(() => {
+  if (channelBreakRefreshTimer) return;
+  channelBreakRefreshTimer = window.setTimeout(() => {
+    channelBreakRefreshTimer = null;
+    for (const channel of channels) void refineChannelBreaks(channel);
+  }, 1500);
+});
+// Cuts move into the look-ahead window as the broadcasts advance.
+window.setInterval(() => {
+  for (const channel of channels) void refineChannelBreaks(channel);
+}, 10 * 60 * 1000);
+window.tube.onChannelCommercialsUpdated(commercialsRoot => {
+  // Freshly split reels join each channel's ad rotation from the next break; playback position is reconciled, not reset.
+  for (const channel of channels) {
+    if (!channel.commercialsRoot || channel.commercialsRoot !== commercialsRoot || !channel.scanComplete || channel.scanning) continue;
+    void scanChannel(channel);
+  }
+});
 window.tube.onWindowFullscreenChange(isFullscreen => {
   nativeWindowFullscreen = isFullscreen;
+  if (!isFullscreen) {
+    document.body.classList.remove('screen-fill');
+    window.SaturdayScenes.exit();
+  }
   syncFullscreenButtonState();
   canvas.width = 0;
   canvas.height = 0;
 });
 window.tube.getWindowFullscreen().then(isFullscreen => {
   nativeWindowFullscreen = Boolean(isFullscreen);
-  syncFullscreenButtonState();
+  return restoreViewMode();
 }).catch(error => console.warn('Could not read fullscreen state', error));
 pictureBypassToggle.addEventListener('click', () => {
   pictureFiltersEnabled = !pictureFiltersEnabled;
   syncBypassControls();
   saveControlPreferences();
 });
+tvLevelerToggle.addEventListener('click', () => {
+  tvLevelerEnabled = !tvLevelerEnabled;
+  syncBypassControls();
+  saveControlPreferences();
+});
+video.addEventListener('loadstart', () => { levelerFastUntil = performance.now() + 2500; });
 audioBypassToggle.addEventListener('click', () => {
   audioFiltersEnabled = !audioFiltersEnabled;
   syncBypassControls();
@@ -4098,7 +6252,17 @@ displayModeSelect.addEventListener('change', () => {
 cabinetTintInput.addEventListener('input', () => setCabinetTint(cabinetTintInput.value));
 
 document.addEventListener('keydown', event => {
-  showPlaybackCursor();
+  if (event.key === 'Enter' && tvGuideDialog.open) {
+    event.preventDefault();
+    tuneGuideChannel();
+    return;
+  }
+  // Esc closes an open menu first (the dialog handles that); otherwise it leaves either fullscreen mode.
+  if (event.key === 'Escape' && fullscreenMode() !== 'off' && !document.querySelector('dialog[open]')) {
+    event.preventDefault();
+    void exitFullscreenModes();
+    return;
+  }
   if (event.target.matches('input,select,button')) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') { event.preventDefault(); openLibrary(); }
   else if (event.code === 'Space' && selectedInput === 'tv') event.preventDefault();
@@ -4107,12 +6271,563 @@ document.addEventListener('keydown', event => {
   else if (event.key === 'ArrowLeft') video.currentTime = Math.max(0, video.currentTime - 5);
   else if (event.key === 'ArrowRight') video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 5);
 });
+// Phone remote: every button maps onto the same cabinet controls a mouse would use.
+const REMOTE_DIGIT_TIMEOUT_MS = 3000;
+const remoteEnableToggle = document.querySelector('#remoteEnableToggle');
+let remoteGamepadReleaseTimer = null;
+function acceptRemoteGamepad(value) {
+  if (selectedInput !== 'aux') return;
+  window.clearTimeout(remoteGamepadReleaseTimer);
+  window.SaturdayGenesisAux?.setPhoneInput(Array.isArray(value?.buttons) ? value.buttons : [], value?.axes || {});
+  remoteGamepadReleaseTimer = window.setTimeout(() => window.SaturdayGenesisAux?.clearPhoneInput(), 1400);
+}
+const remoteDialogStack = [];
+let remoteEnabled = false;
+let remoteDigits = '';
+let remoteDigitTimer = null;
+let remoteLastState = '';
+function channelDialNumber(channel) {
+  const numbered = channelFolderOrder(channel?.root);
+  return Number.isFinite(numbered) ? numbered : channels.indexOf(channel) + 1;
+}
+function youtubeStarterDialNumber(starterId) {
+  const starters = configuredYoutubeStarters();
+  const index = starters.findIndex(item => item.id === starterId);
+  const highestLocalNumber = Math.max(0, ...channels.map(channelDialNumber));
+  return index < 0 ? null : highestLocalNumber + index + 1;
+}
+function tuneChannelNumber(number) {
+  const channel = channels.find(item => channelDialNumber(item) === number && item.enabled !== false && !item.error);
+  if (channel) {
+    selectActiveChannel(channel.id);
+    if (selectedInput !== 'tv') setInputSource('tv');
+    return;
+  }
+  const starter = configuredYoutubeStarters().find(item => youtubeStarterDialNumber(item.id) === number);
+  if (starter) {
+    selectYoutubeStarter(starter.id);
+    if (selectedInput !== 'tv') setInputSource('tv');
+    return;
+  }
+  showChannelSurfText(`CH ${number} --`, 1200);
+}
+function commitRemoteDigits() {
+  window.clearTimeout(remoteDigitTimer);
+  remoteDigitTimer = null;
+  const digits = remoteDigits;
+  remoteDigits = '';
+  if (digits) tuneChannelNumber(Number(digits));
+}
+function enterRemoteDigit(digit) {
+  if (!channelsStartupReady) return;
+  remoteDigits = `${remoteDigits}${digit}`;
+  window.clearTimeout(remoteDigitTimer);
+  // As on a cable box: one digit waits for a second (or ENT); a full-width entry such as 0-9 or 1-2 tunes at once.
+  const width = Math.max(2, String(Math.max(0, ...channels.map(channelDialNumber))).length);
+  if (remoteDigits.length >= width) {
+    showChannelSurfText(remoteDigits.padStart(width, '0'), 900);
+    commitRemoteDigits();
+    return;
+  }
+  showChannelSurfText(`${remoteDigits}${'-'.repeat(width - remoteDigits.length)}`, REMOTE_DIGIT_TIMEOUT_MS + 300);
+  remoteDigitTimer = window.setTimeout(commitRemoteDigits, REMOTE_DIGIT_TIMEOUT_MS);
+}
+function remoteScope() {
+  for (let index = remoteDialogStack.length - 1; index >= 0; index -= 1) {
+    if (remoteDialogStack[index].open) return remoteDialogStack[index];
+  }
+  return [...document.querySelectorAll('dialog[open]')].at(-1) || null;
+}
+function remoteFocusable(scope) {
+  return [...scope.querySelectorAll('button, select, input:not([type="hidden"]), textarea, [role="slider"], [tabindex]:not([tabindex="-1"])')]
+    .filter(element => !element.disabled && !element.closest('[hidden], [inert]') && element.getClientRects().length
+      && getComputedStyle(element).visibility !== 'hidden');
+}
+let lastRemoteFocusRect = null;
+function setRemoteFocus(element) {
+  document.querySelectorAll('.remote-focus').forEach(item => item.classList.remove('remote-focus'));
+  if (!element) return;
+  lastRemoteFocusRect = element.getBoundingClientRect();
+  element.focus({ preventScroll: true });
+  element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  element.classList.add('remote-focus');
+}
+function remoteAdjust(element, direction) {
+  if (element.classList.contains('dial') || element.getAttribute('role') === 'slider') {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key: direction > 0 ? 'ArrowRight' : 'ArrowLeft', bubbles: true, cancelable: true }));
+    return true;
+  }
+  if (element instanceof HTMLSelectElement) {
+    const next = element.selectedIndex + direction;
+    if (next < 0 || next >= element.options.length) return false;
+    element.selectedIndex = next;
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  if (element instanceof HTMLInputElement && (element.type === 'range' || element.type === 'number')) {
+    if (direction > 0) element.stepUp(); else element.stepDown();
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  return false;
+}
+function remoteNearest(current, items, direction) {
+  const from = current.getBoundingClientRect();
+  const horizontal = direction === 'left' || direction === 'right';
+  let best = null;
+  let bestScore = Infinity;
+  for (const element of items) {
+    if (element === current) continue;
+    const rect = element.getBoundingClientRect();
+    const gap = { right: rect.left - from.right, left: from.left - rect.right, down: rect.top - from.bottom, up: from.top - rect.bottom }[direction];
+    const centreShift = { right: rect.left + rect.width / 2 - (from.left + from.width / 2), left: from.left + from.width / 2 - (rect.left + rect.width / 2),
+      down: rect.top + rect.height / 2 - (from.top + from.height / 2), up: from.top + from.height / 2 - (rect.top + rect.height / 2) }[direction];
+    if (centreShift <= 1) continue;
+    const overlaps = horizontal ? rect.top < from.bottom && rect.bottom > from.top : rect.left < from.right && rect.right > from.left;
+    const drift = overlaps ? 0 : horizontal
+      ? Math.min(Math.abs(rect.top - from.bottom), Math.abs(from.top - rect.bottom))
+      : Math.min(Math.abs(rect.left - from.right), Math.abs(from.left - rect.right));
+    const score = Math.max(0, gap) + drift * 2.5;
+    if (score < bestScore) { best = element; bestScore = score; }
+  }
+  return best;
+}
+function remoteArrow(direction) {
+  const scope = remoteScope();
+  if (!scope) {
+    if (selectedInput === 'tv') {
+      if (direction === 'up' || direction === 'down') cycleActiveChannel(direction === 'up' ? 1 : -1);
+      else adjustMasterVolume(direction === 'right' ? 1 : -1);
+    } else if (direction === 'left' || direction === 'right') remoteSeek(direction === 'right' ? 10 : -10);
+    else adjustMasterVolume(direction === 'up' ? 1 : -1);
+    return;
+  }
+  const items = remoteFocusable(scope);
+  if (!items.length) return;
+  const current = items.includes(document.activeElement) ? document.activeElement : null;
+  if (!current) {
+    // A re-render (e.g. the guide after a checkbox or page change) can drop focus; resume beside where it was.
+    const near = lastRemoteFocusRect && remoteClosestTo(lastRemoteFocusRect, items);
+    setRemoteFocus(near || items[0]);
+    return;
+  }
+  if ((direction === 'left' || direction === 'right') && remoteAdjust(current, direction === 'right' ? 1 : -1)) return;
+  const next = remoteNearest(current, items, direction);
+  if (next) setRemoteFocus(next);
+}
+function remoteClosestTo(rect, items) {
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const element of items) {
+    const box = element.getBoundingClientRect();
+    const distance = Math.hypot(box.left + box.width / 2 - x, box.top + box.height / 2 - y);
+    if (distance < bestDistance) { best = element; bestDistance = distance; }
+  }
+  return best;
+}
+// PAGE ◀ / ▶ on the phone remote: guide pages, settings tabs, a screenful of the tape shelf.
+function remotePage(direction) {
+  const scope = remoteScope();
+  if (scope === tvGuideDialog) {
+    document.querySelector(direction > 0 ? '#tvGuideNext' : '#tvGuidePrevious')?.click();
+    return;
+  }
+  if (scope === tvSettingsDialog) {
+    const tabs = [...tvSettingsDialog.querySelectorAll('[data-settings-tab]')].filter(tab => !tab.hidden && tab.getClientRects().length);
+    if (!tabs.length) return;
+    const index = Math.max(0, tabs.findIndex(tab => tab.getAttribute('aria-current') === 'page'));
+    const next = tabs[(index + direction + tabs.length) % tabs.length];
+    next.click();
+    setRemoteFocus(next);
+    return;
+  }
+  if (scope === libraryDialog) {
+    const scroller = [...libraryDialog.querySelectorAll('*')].find(element => element.scrollHeight > element.clientHeight + 4
+      && /auto|scroll/.test(getComputedStyle(element).overflowY));
+    scroller?.scrollBy({ top: direction * scroller.clientHeight * 0.85, behavior: 'smooth' });
+    return;
+  }
+  if (!scope && selectedInput === 'tv') cycleActiveChannel(direction);
+}
+function remoteSeek(seconds) {
+  if (selectedInput === 'tv' && activeYoutubeStarter()) {
+    window.SaturdayTubeYouTubePlayer?.seekBy(seconds);
+    return;
+  }
+  if (selectedInput !== 'video' || !hasVideo) return;
+  video.currentTime = Math.max(0, Math.min(video.duration || Infinity, video.currentTime + seconds));
+}
+function remoteOk() {
+  if (remoteDigits) { commitRemoteDigits(); return; }
+  const scope = remoteScope();
+  if (!scope) {
+    if (selectedInput === 'tv' && activeYoutubeStarter()) window.SaturdayTubeYouTubePlayer?.togglePlayback();
+    else if (selectedInput === 'tv') showChannelSurfText(activeYoutubeStarter()?.name || activeChannel()?.name || 'NO CHANNEL');
+    else playButton.click();
+    return;
+  }
+  const element = remoteFocusable(scope).includes(document.activeElement) ? document.activeElement : null;
+  if (!element) { remoteArrow('down'); return; }
+  if (element instanceof HTMLSelectElement) {
+    element.selectedIndex = (element.selectedIndex + 1) % Math.max(1, element.options.length);
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (!(element instanceof HTMLInputElement && element.type !== 'checkbox' && element.type !== 'radio') && !(element instanceof HTMLTextAreaElement)) {
+    element.click();
+  }
+}
+function remoteBack() {
+  if (remoteDigits) {
+    window.clearTimeout(remoteDigitTimer);
+    remoteDigits = '';
+    showChannelSurfText('--', 500);
+    return;
+  }
+  const scope = remoteScope();
+  if (!scope) return;
+  if (scope === libraryDialog && libraryView && libraryView.current !== libraryView.root && !libraryUpButton.disabled) {
+    libraryUpButton.click();
+    return;
+  }
+  scope.close();
+}
+function remoteToggleSelectedTape() {
+  if (!libraryDialog.open) return;
+  const card = document.activeElement?.closest?.('.library-tape[data-tape-path]');
+  const play = card?.querySelector('.library-tape-play');
+  play?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: true }));
+}
+function waitForTVInput(timeoutMs = 3000) {
+  const startedAt = performance.now();
+  return new Promise(resolve => {
+    const check = () => {
+      if (selectedInput === 'tv' && tvSet.dataset.input === 'tv') resolve(true);
+      else if (performance.now() - startedAt > timeoutMs) resolve(false);
+      else window.setTimeout(check, 80);
+    };
+    check();
+  });
+}
+async function remoteGuide() {
+  if (tvGuideDialog.open) { tvGuideDialog.close(); return; }
+  if (selectedInput !== 'tv') setInputSource('tv');
+  if (await waitForTVInput()) openTVGuide();
+}
+function handleRemoteCommand(command) {
+  if (command?.action === 'gamepad') {
+    if (window.SaturdayIntermission?.active) {
+      window.clearTimeout(remoteGamepadReleaseTimer);
+      window.SaturdayGenesisAux?.clearPhoneInput();
+      return;
+    }
+    acceptRemoteGamepad(command.value);
+    return;
+  }
+  if (command?.action === 'trackpad') {
+    showTrackpadCursor(command.value);
+    if (command.value.type === 'zoom' && !window.SaturdayIntermission?.active) window.SaturdayScenes?.zoomBy(command.value.factor);
+    return;
+  }
+  if (window.SaturdayIntermission?.active) {
+    if (['enter', 'ok', 'back'].includes(command?.action)) void window.SaturdayIntermission.end();
+    return;
+  }
+  const action = command?.action;
+  if (action !== 'digit' && action !== 'enter' && action !== 'ok' && action !== 'back' && remoteDigits) commitRemoteDigits();
+  switch (action) {
+    case 'digit': enterRemoteDigit(command.value); break;
+    case 'enter': if (tvGuideDialog.open) tuneGuideChannel(); else if (remoteDigits) commitRemoteDigits(); else remoteOk(); break;
+    case 'ch-up': cycleActiveChannel(1); break;
+    case 'ch-down': cycleActiveChannel(-1); break;
+    case 'ch-last': {
+      if (previousChannelId?.startsWith('youtube:')) selectYoutubeStarter(previousChannelId.slice('youtube:'.length));
+      else {
+        const id = previousChannelId?.replace(/^local:/, '');
+        if (id && channels.some(item => item.id === id)) {
+          selectActiveChannel(id);
+          if (selectedInput !== 'tv') setInputSource('tv');
+        }
+      }
+      break;
+    }
+    // The phone remote steps one notch at a time; holding the key repeats.
+    case 'vol-up': adjustMasterVolume(1, 1); break;
+    case 'vol-down': adjustMasterVolume(-1, 1); break;
+    case 'mute': toggleMute(); break;
+    case 'play': if (!playButton.disabled) playButton.click(); break;
+    case 'rew': remoteSeek(-10); break;
+    case 'ff': remoteSeek(10); break;
+    case 'prev': case 'next': {
+      const button = document.querySelector(action === 'prev' ? '#previousButton' : '#nextButton');
+      if (button && !button.disabled) button.click();
+      break;
+    }
+    case 'track-up': adjustTracking(1); break;
+    case 'track-down': adjustTracking(-1); break;
+    case 'input-tv': setInputSource('tv'); break;
+    case 'input-vcr': setInputSource('video'); break;
+    case 'input-cycle': inputButton.click(); break;
+    case 'fullscreen': void cycleFullscreen(); break;
+    case 'scene-next': void changeRoom(); break;
+    case 'up': case 'down': case 'left': case 'right': remoteArrow(action); break;
+    case 'page-prev': remotePage(-1); break;
+    case 'page-next': remotePage(1); break;
+    case 'ok': remoteOk(); break;
+    case 'back': remoteBack(); break;
+    case 'menu':
+      if (tvSettingsDialog.open) tvSettingsDialog.close();
+      else { selectSettingsTab('video'); showScreenDialog(tvSettingsDialog); }
+      break;
+    case 'guide': void remoteGuide(); break;
+    case 'shelf': if (libraryDialog.open) libraryDialog.close(); else void openLibrary(); break;
+    case 'info': if (selectedInput === 'tv') showChannelSurfText(activeYoutubeStarter()?.name || (activeChannel() ? `${channelSurfAbbreviation(activeChannel())} ${channelDialNumber(activeChannel())}` : 'NO CHANNEL')); else setStatus(activePlaylist()?.tracks?.[currentIndex]?.title || 'NO TAPE'); break;
+    case 'add': remoteToggleSelectedTape(); break;
+    case 'queue': if (libraryDialog.open && !libraryAddButton.disabled) libraryAddButton.click(); break;
+    case 'video-fx': pictureBypassToggle.click(); break;
+    case 'audio-fx': audioBypassToggle.click(); break;
+    case 'screen-type': setRemotePanelControl('display-mode', displayMode === 'rear' ? 'crt' : 'rear'); break;
+    case 'color-filter': {
+      const modes = ['color', 'lowstim', 'bw'];
+      setRemotePanelControl('picture-mode', modes[(modes.indexOf(selectedPictureMode) + 1) % modes.length]);
+      break;
+    }
+    case 'skin-random': setCabinetTint(randomCabinetTint()); break;
+    case 'set': setRemotePanelControl(command.value?.id, command.value?.value); break;
+    default: return;
+  }
+  window.setTimeout(reportRemoteState, 60);
+}
+function remoteFocusLabel() {
+  const scope = remoteScope();
+  const element = scope && scope.contains(document.activeElement) ? document.activeElement : null;
+  if (!element) return '';
+  const tape = element.closest('.library-tape[data-tape-path]');
+  const label = tape
+    ? tape.dataset.tapePath.split('/').pop().replace(/\.[^.]+$/, '')
+    : element.getAttribute('aria-label') || element.textContent || element.value || '';
+  return label.replace(/\s+/g, ' ').trim().slice(0, 48);
+}
+// A random but tasteful cabinet colour: any hue, moderate saturation, never too dark or washed out.
+function randomCabinetTint() {
+  const hue = Math.random() * 360;
+  const saturation = 0.35 + Math.random() * 0.45;
+  const lightness = 0.32 + Math.random() * 0.3;
+  const channel = n => {
+    const k = (n + hue / 30) % 12;
+    const value = lightness - saturation * Math.min(lightness, 1 - lightness) * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(value * 255).toString(16).padStart(2, '0');
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+// The controls on the back of the phone remote. Each one drives the same TV setting as the settings menu, through the
+// same element and event, so changes apply and save exactly as they would from the menu.
+const remoteDial = (id, label, group, dial) => ({ id, label, group, kind: 'knob', dial });
+const remoteInput = (id, label, group, selector, extra = {}) => ({ id, label, group, selector, ...extra });
+const remoteToggle = (id, label, group, get, toggle) => ({ id, label, group, kind: 'switch', get, toggle });
+const REMOTE_PANEL_CONTROLS = [
+  remoteToggle('picture-fx', 'PICTURE FX', 'video', () => pictureFiltersEnabled, () => pictureBypassToggle.click()),
+  remoteInput('picture-mode', 'COLOR', 'video', '#pictureMode', { kind: 'selector' }),
+  remoteInput('display-mode', 'SCREEN', 'video', '#displayMode', { kind: 'selector' }),
+  remoteDial('scanlines', 'SCANLINES', 'video', scanlineDial),
+  remoteDial('curve', 'CURVE', 'video', curveDial),
+  remoteDial('edge-blur', 'EDGE BLUR', 'video', edgeBlurDial),
+  remoteDial('hue', 'HUE', 'video', hueDial),
+  remoteDial('vhs-scan', 'TRACKING', 'video', vhsScanDial),
+  remoteDial('glitch', 'GLITCH', 'video', glitchDial),
+  remoteDial('broken-tape', 'BROKEN TAPE', 'video', brokenTapeDial),
+  remoteDial('glow', 'GLOW', 'video', glowDial),
+  remoteDial('brightness', 'BRIGHTNESS', 'video', brightnessDial),
+  remoteInput('cabinet-skin', 'CABINET', 'video', '#cabinetSkin', { kind: 'selector' }),
+  remoteToggle('audio-fx', 'AUDIO FX', 'audio', () => audioFiltersEnabled, () => audioBypassToggle.click()),
+  remoteInput('audio-effect', 'EFFECT', 'audio', '#audioEffectSelect', { kind: 'selector' }),
+  remoteDial('fx-amount', 'FX MIX', 'audio', fxAmountDial),
+  remoteToggle('tv-leveler', 'LEVELER', 'audio', () => tvLevelerEnabled, () => tvLevelerToggle.click()),
+  remoteToggle('sound-fx', 'CLICKS', 'audio', () => soundEffectsEnabled, () => soundEffectsToggle.click()),
+  remoteInput('sound-fx-volume', 'CLICK VOL', 'audio', '#soundEffectsVolume', { kind: 'knob', event: 'input' }),
+  remoteInput('scene', 'ROOM', 'scene', '#sceneSelect', { kind: 'selector' }),
+  remoteInput('scene-light', 'ROOM LIGHT', 'scene', '#sceneLight', { kind: 'knob', event: 'input' }),
+  remoteInput('scene-zoom', 'ZOOM', 'scene', '#sceneZoom', { kind: 'knob', event: 'input', scale: 'log' }),
+  remoteInput('scene-auto-zoom', 'AUTO ZOOM', 'scene', '#sceneAutoZoomEnabled', { kind: 'switch' }),
+  remoteInput('scene-auto-zoom-mode', 'MOTION', 'scene', '#sceneAutoZoomMode', { kind: 'selector' }),
+  remoteInput('scene-auto-zoom-rate', 'ZOOM SPEED', 'scene', '#sceneAutoZoomRate', { kind: 'knob', event: 'input' }),
+  remoteInput('intermission', 'BREAKS', 'intermission', '#intermissionEnabled', { kind: 'switch' }),
+  remoteInput('intermission-interval', 'EVERY (MIN)', 'intermission', '#intermissionInterval', { kind: 'knob', max: 240 }),
+  remoteInput('intermission-duration', 'LENGTH (MIN)', 'intermission', '#intermissionDuration', { kind: 'knob', max: 60 }),
+  { id: 'intermission-start', label: 'START BREAK', group: 'intermission', kind: 'button', press: () => document.querySelector('#intermissionStart')?.click() }
+];
+const remotePanelById = new Map(REMOTE_PANEL_CONTROLS.map(control => [control.id, control]));
+function remotePanelElement(control) {
+  return control.dial || (control.selector ? document.querySelector(control.selector) : null);
+}
+function remotePanelSnapshot() {
+  const controls = [];
+  for (const control of REMOTE_PANEL_CONTROLS) {
+    const element = remotePanelElement(control);
+    const item = { id: control.id, label: control.label, group: control.group, kind: control.kind };
+    if (control.kind === 'button') { controls.push(item); continue; }
+    if (control.get) item.value = control.get();
+    else if (!element) continue;
+    else if (control.dial) {
+      Object.assign(item, { min: Number(element.getAttribute('aria-valuemin')), max: Number(element.getAttribute('aria-valuemax')), step: 1, value: dialValue(element) });
+    } else if (element.type === 'checkbox') item.value = element.checked;
+    else if (element.tagName === 'SELECT') {
+      item.value = element.value;
+      item.options = [...element.options].filter(option => !option.disabled).map(option => ({ value: option.value, label: option.textContent.trim().slice(0, 32) }));
+    } else {
+      const min = Number(element.min);
+      Object.assign(item, { min, max: control.max ?? Number(element.max), step: Number(element.step) || 1, value: Number(element.value) });
+      if (control.scale) item.scale = control.scale;
+    }
+    if (element?.disabled) item.disabled = true;
+    controls.push(item);
+  }
+  return controls;
+}
+function setRemotePanelControl(id, value) {
+  const control = typeof id === 'string' ? remotePanelById.get(id) : null;
+  if (!control) return;
+  if (control.kind === 'button') { control.press(); return; }
+  if (control.toggle) {
+    if (typeof value === 'boolean' && value !== control.get()) control.toggle();
+    return;
+  }
+  const element = remotePanelElement(control);
+  if (!element || element.disabled) return;
+  if (control.dial) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return;
+    const before = dialValue(element);
+    setDialValue(element, value);
+    if (dialValue(element) !== before) dialChangeHandlers.get(element)?.();
+    return;
+  }
+  if (element.type === 'checkbox') {
+    if (typeof value !== 'boolean' || element.checked === value) return;
+    element.checked = value;
+  } else if (element.tagName === 'SELECT') {
+    if (![...element.options].some(option => option.value === value && !option.disabled) || element.value === value) return;
+    element.value = value;
+  } else {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return;
+    const step = Number(element.step) || 1;
+    const max = control.max ?? Number(element.max);
+    const next = Math.max(Number(element.min), Math.min(max, Math.round(value / step) * step));
+    if (Number(element.value) === next) return;
+    element.value = String(Number(next.toFixed(4)));
+  }
+  element.dispatchEvent(new Event(control.event || 'change', { bubbles: true }));
+}
+function remoteStateSnapshot() {
+  const channel = activeChannel();
+  const streaming = activeYoutubeStarter();
+  const segment = selectedInput === 'tv' && !streaming && channel ? locateChannelSegment(channel, broadcastElapsed(channel))?.segment : null;
+  const track = selectedInput === 'tv' ? segment : activePlaylist()?.tracks?.[currentIndex];
+  const youtubeData = streaming ? window.SaturdayTubeYouTubePlayer?.getPlayer()?.getVideoData?.() : null;
+  return {
+    input: selectedInput,
+    auxGame: window.SaturdayGenesisAux?.hasGame() === true,
+    channel: streaming ? { number: youtubeStarterDialNumber(streaming.id), abbreviation: streaming.name.slice(0, 20), name: streaming.name } : channel ? { number: channelDialNumber(channel), abbreviation: channelSurfAbbreviation(channel), name: channel.name || '' } : null,
+    title: selectedInput === 'aux' ? (window.SaturdayGenesisAux?.gameTitle() || 'NO CARTRIDGE') : youtubeData?.title || track?.title || '',
+    volume: Math.round(dialValue(videoDial)),
+    muted: mutedVolume !== null,
+    playing: selectedInput === 'aux' ? window.SaturdayGenesisAux?.hasGame() === true : streaming ? window.SaturdayTubeYouTubePlayer?.isPlaying() === true : hasVideo && !video.paused && !video.seeking && video.readyState >= 2,
+    loading: selectedInput === 'tv' && tvSearching ? channelLoadingStatus() : '',
+    channelProgress: channelPreparationStatus(),
+    intermission: window.SaturdayIntermission?.active === true,
+    digits: remoteDigits,
+    menu: tvSettingsDialog.open,
+    guide: tvGuideDialog.open,
+    shelf: libraryDialog.open,
+    selection: librarySelection.size,
+    focus: remoteFocusLabel(),
+    fullscreen: fullscreenMode(),
+    room: window.SaturdayScenes.name,
+    videoFx: pictureFiltersEnabled,
+    audioFx: audioFiltersEnabled,
+    displayMode,
+    pictureMode: selectedPictureMode,
+    skinColor: cabinetTint,
+    panel: remotePanelSnapshot()
+  };
+}
+function reportRemoteState() {
+  if (!remoteEnabled) return;
+  const state = JSON.stringify(remoteStateSnapshot());
+  if (state === remoteLastState) return;
+  remoteLastState = state;
+  window.tube.reportRemoteState(JSON.parse(state));
+}
+function renderRemotePairing(pairing = {}) {
+  remoteEnabled = pairing.enabled === true && pairing.running === true;
+  remoteEnableToggle.classList.toggle('on', pairing.enabled === true);
+  remoteEnableToggle.setAttribute('aria-pressed', String(pairing.enabled === true));
+  const qr = document.querySelector('#remoteQr');
+  const hint = document.querySelector('#remoteHint');
+  const openOnMac = document.querySelector('#remoteOpenButton');
+  qr.hidden = !(remoteEnabled && pairing.svg);
+  openOnMac.hidden = !remoteEnabled;
+  document.querySelector('#remoteMirrorButton').hidden = !remoteEnabled;
+  document.querySelector('#remoteResetButton').hidden = !remoteEnabled;
+  if (remoteEnabled && pairing.svg) {
+    document.querySelector('#remoteQrImage').src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(pairing.svg)}`;
+    document.querySelector('#remoteUrl').textContent = pairing.displayUrl || '';
+    hint.textContent = "Open the remote on this Mac without scanning. To pair a phone, scan the QR code; both devices must be on the same Wi-Fi.";
+  } else if (pairing.error) {
+    hint.textContent = pairing.error;
+  } else if (remoteEnabled) {
+    hint.textContent = 'Phone QR pairing needs Wi-Fi; open the remote on this Mac without scanning.';
+  } else {
+    hint.textContent = 'Turn on the remote to open it on this Mac or pair a phone with the QR code.';
+  }
+  remoteLastState = '';
+  reportRemoteState();
+}
+const remoteDialogObserver = new MutationObserver(records => {
+  for (const { target } of records) {
+    const index = remoteDialogStack.indexOf(target);
+    if (index >= 0) remoteDialogStack.splice(index, 1);
+    if (target.open) remoteDialogStack.push(target);
+    else document.querySelectorAll('.remote-focus').forEach(item => { if (target.contains(item)) item.classList.remove('remote-focus'); });
+  }
+});
+for (const dialog of document.querySelectorAll('dialog')) remoteDialogObserver.observe(dialog, { attributes: true, attributeFilter: ['open'] });
+document.addEventListener('pointerdown', () => document.querySelectorAll('.remote-focus').forEach(item => item.classList.remove('remote-focus')), { passive: true });
+remoteEnableToggle.addEventListener('click', async () => {
+  remoteEnableToggle.disabled = true;
+  try { renderRemotePairing(await window.tube.setRemoteEnabled(!remoteEnableToggle.classList.contains('on'))); }
+  finally { remoteEnableToggle.disabled = false; }
+});
+async function openRemotePage(button, open, opened, failed) {
+  const hint = document.querySelector('#remoteHint');
+  button.disabled = true;
+  try {
+    const result = await open();
+    hint.textContent = result?.ok ? opened : result?.error || failed;
+  } catch {
+    hint.textContent = failed;
+  } finally {
+    button.disabled = false;
+  }
+}
+document.querySelector('#remoteOpenButton').addEventListener('click', event => openRemotePage(event.currentTarget, () => window.tube.openRemoteOnThisMac(),
+  'The paired remote opened in this Mac’s browser.', 'The paired remote could not be opened in your browser.'));
+document.querySelector('#remoteMirrorButton').addEventListener('click', event => openRemotePage(event.currentTarget, () => window.tube.openRemoteMirror(),
+  'The screen mirror opened in this Mac’s browser. It follows the paired phone’s keys, backlight and display.', 'The screen mirror could not be opened in your browser.'));
+document.querySelector('#remoteResetButton').addEventListener('click', async () => renderRemotePairing(await window.tube.resetRemoteKey()));
+document.querySelector('[data-settings-tab="remote"]').addEventListener('click', async () => renderRemotePairing(await window.tube.getRemotePairing()));
+window.tube.onRemoteCommand(handleRemoteCommand);
+window.tube.getRemotePairing().then(renderRemotePairing).catch(error => console.warn('Phone remote status unavailable', error));
+window.setInterval(reportRemoteState, 700);
 restoreMetadataCache();
 restoreMetadataOverrides();
 shelfRestorePromise = restoreShelfRoot();
 loadPlaylists().catch(error => { console.error(error); renderPlaylist(); });
 loadChannels().catch(error => { console.error('TV channel setup could not be restored', error); renderChannels(); });
 window.addEventListener('beforeunload', () => {
+  try { localStorage.setItem(VIEW_MODE_KEY, fullscreenMode()); }
+  catch (error) { console.warn('View mode could not be saved on exit', error); }
+  saveControlPreferences();
   savePlaybackSession();
   saveChannelPlaybackState();
 });
@@ -4145,6 +6860,97 @@ document.addEventListener('pointermove', showPlaybackCursor, { passive: true });
 document.addEventListener('pointerdown', showPlaybackCursor, { passive: true });
 libraryDialog.addEventListener('close', () => {
   scheduleFrameLoop();
-  showPlaybackCursor();
+});
+showPlaybackCursor();
+let intermissionPlayback = null;
+window.SaturdayIntermission.init({
+  pause(now) {
+    const channel = selectedInput === 'tv' ? activeChannel() : null;
+    const snapshot = channel && channelPlaybackSnapshot(channel, now, true);
+    if (snapshot && channel.broadcast) {
+      channel.broadcast.initialOffsetSeconds = snapshot.elapsedSeconds;
+      channel.broadcast.startedAtMs = now;
+    }
+    const wasPlaying = hasVideo && ((!video.paused && !video.ended) || pendingPlaybackRestore?.wasPlaying === true);
+    intermissionPlayback = {
+      wasPlaying,
+      staticWasPlaying: !staticPicture.paused,
+      live: livePlayback ? {
+        index: currentIndex,
+        track: activePlaylist()?.tracks[currentIndex],
+        options: { ...livePlayback.options, forceLive: true, forceEncode: true },
+        restore: {
+          trackPath: activePlaybackPath,
+          currentTime: video.readyState >= 1 ? playbackSourceTime() : Number(pendingPlaybackRestore?.currentTime) || livePlayback.baseSeconds,
+          wasPlaying,
+          input: selectedInput
+        }
+      } : null
+    };
+    video.pause();
+    staticPicture.pause();
+    window.SaturdayGenesisAux?.setActive(false);
+    window.SaturdayGenesisAux?.clearPhoneInput();
+    window.clearTimeout(remoteGamepadReleaseTimer);
+    for (const key of soundEffectAudio.keys()) stopSoundEffect(key);
+    if (intermissionPlayback.live) {
+      switchingTracks = true;
+      playbackGeneration += 1;
+      activePlaybackUrl = '';
+      video.removeAttribute('src');
+      video.load();
+      switchingTracks = false;
+    }
+    intermissionPlayback.stopped = window.tube.setIntermissionActive(true).catch(error => {
+      console.error('Intermission could not stop live streaming', error);
+      setStatus('INTERMISSION STREAM STOP FAILED');
+    });
+    syncLoopingSoundEffects();
+    saveChannelPlaybackState();
+    reportRemoteState();
+  },
+  keepPaused() {
+    if (!video.paused) video.pause();
+    if (!staticPicture.paused) staticPicture.pause();
+    window.SaturdayGenesisAux?.setActive(false);
+    window.SaturdayGenesisAux?.clearPhoneInput();
+  },
+  shiftClocks(startedAt, now, resumeStart) {
+    for (const channel of channels) {
+      if (channel.broadcast) channel.broadcast.startedAtMs = resumeStart(channel.broadcast.startedAtMs, startedAt, now);
+    }
+  },
+  async prepareResume() {
+    await intermissionPlayback?.stopped;
+    await window.tube.setIntermissionActive(false);
+  },
+  async resume() {
+    const state = intermissionPlayback;
+    intermissionPlayback = null;
+    if (state?.deferredSource && state.deferredSource.generation === playbackGeneration) {
+      attachPlaybackUrl(state.deferredSource.url, state.deferredSource.generation);
+    } else if (state?.live) {
+      beginTrackPlayback(state.live.index, state.live.restore, state.live.track, state.live.options);
+    } else if (state?.wasPlaying) await startVideoPlayback();
+    if (state?.staticWasPlaying) await staticPicture.play();
+    window.SaturdayGenesisAux?.setActive(selectedInput === 'aux');
+    syncLoopingSoundEffects();
+    saveChannelPlaybackState();
+    reportRemoteState();
+  },
+  error() { setStatus('COULD NOT RESUME AFTER BREAK · PRESS PLAY'); }
 });
 scheduleFrameLoop();
+function finishRendererStartup() {
+  try {
+    startStartupSequence();
+  } catch (error) {
+    console.error('TV startup sequence failed', error);
+  } finally {
+    // This runs on load while the window is intentionally hidden. Do not gate the ready IPC on RAF;
+    // Chromium may throttle hidden-window animation frames, preventing main from ever showing the TV.
+    document.body.classList.remove('starting');
+    window.tube.notifyRendererReady();
+  }
+}
+window.addEventListener('load', finishRendererStartup, { once: true });

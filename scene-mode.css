@@ -1,0 +1,89 @@
+/* The camera paints the room into a fixed, pixel-budgeted viewport canvas. Only the live TV is transformed. */
+#sceneViewport { position:fixed; inset:0; z-index:20; overflow:hidden; background:#000; touch-action:none; }
+#sceneViewport[hidden] { display:none; }
+#sceneWorld { position:absolute; inset:0; width:100%; height:100%; overflow:hidden; contain:strict; background:#000; }
+#sceneImage { position:absolute; inset:0; display:block; width:100%; height:100%; pointer-events:none; }
+#sceneTVMount { position:absolute; left:0; top:0; z-index:1; width:1000px; transform-origin:bottom center; }
+body.scene-mode #tvSet {
+  position:relative; width:1000px; height:auto; min-width:0; max-width:none; min-height:0; max-height:none;
+  flex:none; margin:0; --cab-zoom:1;
+  padding:22px 28px 18px; border-radius:48px 48px 40px 40px;
+  /* The room's key light sits up and to the left, so the cabinet throws its shadow down and right; firmer in a brighter room. */
+  box-shadow:inset 0 2px 3px #ffffff30,inset 0 -12px 18px #0007,16px 14px 28px rgb(0 0 0 / calc(.22 + var(--scene-light,.65) * .42)),0 4px 0 #111;
+}
+body.scene-mode #tvSet .screen-bezel {
+  padding:20px;
+  /* The raised bezel frame casts onto the cabinet face, below and right of it, away from the key light. */
+  box-shadow:inset 0 3px 8px #000d,inset 0 -2px 2px #fff2,0 2px 0 #fff2,
+    5px 8px 10px -1px rgb(0 0 0 / calc(.16 + var(--scene-light,.65) * .44)),
+    -1px -1px 1px rgb(var(--scene-warm,255 200 140) / calc(var(--scene-light,.65) * .22));
+}
+body.scene-mode #tvSet .television-face { flex:none; grid-template-rows:auto auto; }
+body.scene-mode #tvSet .picture-cabinet { grid-template-rows:28px auto; }
+body.scene-mode #tvSet .screen-bezel { aspect-ratio:auto; height:auto; container-type:normal; }
+body.scene-mode #tvSet .stage { aspect-ratio:100 / var(--scene-screen-height,100); height:auto; flex:none; align-self:center; max-height:none; }
+/* The tube sits recessed behind the bezel: its upper-left lip shades the glass from room light until the picture outshines it. */
+.scene-screen-lip { display:none; pointer-events:none; }
+body.scene-mode .scene-screen-lip {
+  display:block; position:absolute; inset:0; z-index:3; border-radius:inherit;
+  box-shadow:
+    inset 7px 10px 14px -4px rgb(0 0 0 / calc(var(--scene-light,.65) * .55 * (1 - min(1, var(--screen-light,0) * .5)))),
+    inset -1px -2px 3px rgb(var(--scene-warm,255 200 140) / calc(var(--scene-light,.65) * .12));
+}
+.scene-cabinet-light { display:none; pointer-events:none; }
+body.scene-mode .scene-cabinet-light {
+  display:block; position:absolute; inset:0; z-index:50; border-radius:inherit;
+  background:
+    /* The picture's own light (scene-mode.js updateGlow). The tube faces forward, so it floods the bezel walls hugging the glass,
+       fades into the recess corners, and only a soft bounce reaches the cabinet face, which sits level with it. GLOW widens the bounce. */
+    radial-gradient(ellipse calc(var(--screen-span-x,40%) * 1.17) calc(var(--screen-span-y,30%) * 1.25) at var(--screen-center,50% 40%),rgb(var(--screen-light-rgb,0 0 0) / min(.8, calc(var(--screen-light,0) * 1.05))) 70%,transparent),
+    radial-gradient(ellipse calc(var(--screen-span-x,40%) * 2 * var(--screen-light-reach,1)) calc(var(--screen-span-y,30%) * 2.5 * var(--screen-light-reach,1)) at var(--screen-center,50% 40%),rgb(var(--screen-light-rgb,0 0 0) / min(.45, calc(var(--screen-light,0) * .2))),transparent),
+    /* Ambient occlusion where the cabinet meets the furniture, and form shading as the box turns away from the key light. */
+    linear-gradient(to top,rgb(0 0 0 / .32),rgb(0 0 0 / .1) 3.5%,transparent 10%),
+    radial-gradient(ellipse 82% 78% at 36% 30%,transparent 58%,rgb(0 0 0 / calc(.1 + var(--scene-light) * .22))),
+    linear-gradient(110deg,rgb(var(--scene-warm) / calc(var(--scene-light) * .38)),transparent 24% 76%,rgb(var(--scene-cool) / calc(var(--scene-light) * .22))),
+    radial-gradient(ellipse at 9% 12%,rgb(var(--scene-warm) / calc(var(--scene-light) * .2)),transparent 55%),
+    linear-gradient(rgb(0 0 0 / calc((1 - var(--scene-light)) * .82)),rgb(0 0 0 / calc((1 - var(--scene-light)) * .82)));
+  box-shadow:inset 3px 2px 3px rgb(var(--scene-warm) / calc(var(--scene-light) * .65)),inset -2px 0 3px rgb(var(--scene-cool) / calc(var(--scene-light) * .4));
+}
+body.scene-mode { background:#000 !important; }
+body.scene-mode > .room { visibility:hidden; pointer-events:none; }
+body.scene-mode #sceneViewport { visibility:visible; }
+body.scene-dragging,body.scene-dragging #sceneViewport { cursor:grabbing; user-select:none; }
+body.scene-mode #tvSet .picture-heading { cursor:grab; }
+#sceneHud { position:fixed; left:18px; top:18px; z-index:60; }
+#sceneHud button {
+  border:1px solid #ffffff26; border-radius:24px; padding:10px 16px;
+  color:#e7dfd1; background:#141312cc; backdrop-filter:blur(14px); cursor:pointer;
+  font:600 11px/1.5 system-ui,sans-serif; letter-spacing:.08em;
+}
+#sceneHud small { display:block; font-size:9px; color:#b5ab98; }
+#sceneHud button:focus-visible { outline:2px solid #ffe6aa; outline-offset:3px; }
+#sceneHint { position:fixed; bottom:14px; left:0; width:100%; text-align:center; pointer-events:none; color:#eee8d7aa; text-shadow:0 1px 3px #000; font:11px system-ui,sans-serif; }
+#sceneHud, #sceneHint { opacity:1; transition:opacity .25s ease; }
+#sceneViewport.scene-ui-idle :is(#sceneHud, #sceneHint) { opacity:0; pointer-events:none; }
+#sceneViewport.scene-ui-idle #sceneHud:has(:focus-visible) { opacity:1; pointer-events:auto; }
+@media (prefers-reduced-motion:reduce) {
+  #sceneHud, #sceneHint { transition:none; }
+}
+#scenePreview { width:100%; height:100px; object-fit:cover; border:1px solid #67b4e655; border-radius:3px; }
+#sceneDeveloperAutoZoom[hidden] { display:none !important; }
+.scene-auto-zoom { display:grid; gap:7px; padding:9px; border:1px dashed #72c9ff88; border-radius:4px; color:#e1f4ff; background:linear-gradient(145deg,#11314b,#101b2b); }
+.scene-auto-zoom > strong { color:#8ed8ff; font:700 11px ui-monospace,monospace; letter-spacing:.12em; }
+.scene-auto-zoom .scene-auto-zoom-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; font-weight:700; }
+.scene-auto-zoom .scene-auto-zoom-toggle input[type="checkbox"] { width:20px; height:20px; margin:0; accent-color:#69c6ff; }
+.scene-auto-zoom input[type="range"] { accent-color:#69c6ff; }
+.scene-auto-zoom p { color:#c9deeb; font-size:11px; }
+#sceneAutoZoomStatus { color:#9ee6b1; font:700 10px ui-monospace,monospace; }
+.scene-controls { display:grid; grid-template-columns:1fr; gap:9px; }
+.scene-controls label { display:grid; grid-template-columns:1fr auto; gap:4px 12px; align-items:center; }
+.scene-controls select,.scene-controls input { grid-column:1 / -1; width:100%; }
+.scene-controls input[type="range"] { accent-color:#b4e4ff; min-height:24px; cursor:pointer; }
+.scene-controls p { font-size:13px; line-height:1.35; margin:0; }
+.scene-control-actions { display:flex; gap:8px; }
+.scene-control-actions button { flex:1; }
+#sceneMessage { color:#ffe09f; }
+.view-modes { grid-template-columns:repeat(4,minmax(0,1fr)); }
+#tvSettingsDialog .settings-box-tabs { overflow-x:auto; }
+#tvSettingsDialog .settings-box-tabs button { flex-shrink:0; }
+#tvSettingsDialog .settings-pane .scene-controls { font-size:16px; }

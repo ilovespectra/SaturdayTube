@@ -28,7 +28,17 @@
   let ignorePauseUntil = 0;
   let programPlaybackActive = false;
 
-  function currentTrack() { return activePlaylist()?.tracks[currentIndex] || null; }
+  function currentTrackIndex() {
+    return Number.isInteger(globalThis.currentIndex) ? globalThis.currentIndex : -1;
+  }
+  function currentTrack() {
+    const index = currentTrackIndex();
+    const playlist = typeof globalThis.activePlaylist === 'function' ? globalThis.activePlaylist() : null;
+    return playlist?.tracks?.[index] || null;
+  }
+  function nextPlayableTrackIndex(baseIndex = currentTrackIndex() + 1) {
+    return typeof globalThis.findNextPlayableTrack === 'function' ? globalThis.findNextPlayableTrack(baseIndex) : -1;
+  }
   function shouldUseBoundaryBreak(durationSeconds, hasNextVideo) {
     const duration = Number(durationSeconds);
     return Boolean(hasNextVideo) && Number.isFinite(duration) && duration > 0 && duration < MIN_MIDROLL_SECONDS;
@@ -113,7 +123,7 @@
         : `${count} CHANNEL ADS READY · BROADCAST CLOCK LIVE`);
     } else if (enabled) {
       const breakCount = plan?.breaks?.length;
-      const nextIndex = findNextPlayableTrack(currentIndex + 1);
+      const nextIndex = nextPlayableTrackIndex();
       const shortEpisode = hasVideo && Number.isFinite(video.duration) && video.duration < MIN_MIDROLL_SECONDS;
       setMessage(!hasVideo
         ? count ? `${count} ADS READY · AWAITING TAPE` : 'ADD COMMERCIALS IN MANAGE ADS'
@@ -453,7 +463,7 @@
       saveChannelPlaybackState(adSession.programTime, adSession.wasPlaying && !adSession.pausedByUser);
       return;
     }
-    const track = activePlaylist()?.tracks[currentIndex];
+    const track = currentTrack();
     if (!track?.path) return;
     const resumeTrack = Number.isInteger(adSession.boundaryNextIndex)
       ? activePlaylist()?.tracks[adSession.boundaryNextIndex] || track
@@ -517,7 +527,7 @@
     if (window.saturdayTubeMoviePrerollActive) return;
     if (!adSession) {
       if (selectedInput === 'tv') return;
-      const nextIndex = findNextPlayableTrack(currentIndex + 1);
+      const nextIndex = nextPlayableTrackIndex();
       if (enabled && programPlaybackActive && selectedInput !== 'static'
         && shouldUseBoundaryBreak(video.duration, nextIndex >= 0) && startBoundaryBreak(nextIndex)) {
         event.preventDefault();

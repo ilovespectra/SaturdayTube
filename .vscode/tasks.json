@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Parse commercials (split reels into single spots)",
+      "type": "shell",
+      "command": "npm run parse-commercials",
+      "problemMatcher": []
+    },
+    {
+      "label": "Parse commercials (dry run)",
+      "type": "shell",
+      "command": "npm run parse-commercials -- --dry-run",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -24,12 +24,30 @@ function shuffled(items, random = Math.random) {
 const EPISODE_ORDER_VERSION = 'season-episode-v1';
 const MAX_DIRECT_CHANNEL_AD_SECONDS = 180;
 const MAX_DIRECT_CHANNEL_ADS = 120;
+const MAX_CHANNEL_CLIP_SECONDS = 90;
+const COMMERCIAL_REEL_NAME = /(?:^|[^a-z])(?:bumpers|compilation|commercials|ads|promos|spots|commercial break|ad break)(?:$|[^a-z])/i;
+
+// Reels hold several ads back to back; they must be split before airing, never played whole as one "commercial".
+function isCommercialReel(item) {
+  const duration = Number(item?.durationSeconds);
+  if (!Number.isFinite(duration)) return false;
+  if (duration > MAX_DIRECT_CHANNEL_AD_SECONDS) return true;
+  return duration > 45 && COMMERCIAL_REEL_NAME.test(path.basename(String(item?.path || item?.title || ''), path.extname(String(item?.path || ''))));
+}
+
+// Automatic splits air without manual review; only clips the user switched off, or uncut chunks, stay out.
+function isChannelReadyClip(clip) {
+  const duration = Number(clip?.durationSeconds);
+  return Boolean(clip && clip.enabled !== false && Number.isFinite(duration) && duration >= 2.5
+    && (clip.reviewed === true || duration <= MAX_CHANNEL_CLIP_SECONDS));
+}
+
 function selectDirectChannelCommercialSources(originalAds, readySourcePaths = new Set()) {
   const ready = readySourcePaths instanceof Set ? readySourcePaths : new Set(readySourcePaths || []);
   return (Array.isArray(originalAds) ? originalAds : [])
     .filter(item => typeof item?.path === 'string' && Number.isFinite(Number(item.durationSeconds))
       && Number(item.durationSeconds) >= 2.5 && Number(item.durationSeconds) <= MAX_DIRECT_CHANNEL_AD_SECONDS
-      && !ready.has(path.resolve(item.path)))
+      && !isCommercialReel(item) && !ready.has(path.resolve(item.path)))
     .slice(0, MAX_DIRECT_CHANNEL_ADS)
     .map(item => ({
       ...item,
@@ -58,7 +76,20 @@ function episodeCoordinates(item) {
   if (seasonEpisode) { season = Number(seasonEpisode[1]); episode = Number(seasonEpisode[2]); }
   else if (xEpisode) { season = Number(xEpisode[1]); episode = Number(xEpisode[2]); }
   else if (namedEpisode) episode = Number(namedEpisode[1]);
-  return { season, episode, fileName };
+  return { season, episode, fileName, aired: airedKey(fileName) };
+}
+
+// Air dates (1994-03-12, 1994.03.12) or a release year (1994) order un-numbered episodes chronologically.
+function airedKey(fileName) {
+  const date = fileName.match(/(?:^|[^0-9])(19[3-9]\d|20[0-4]\d)[-._ ](0[1-9]|1[0-2])[-._ ](0[1-9]|[12]\d|3[01])(?:$|[^0-9])/);
+  if (date) return Number(date[1]) * 10000 + Number(date[2]) * 100 + Number(date[3]);
+  const year = fileName.match(/(?:^|[^0-9])(19[3-9]\d|20[0-4]\d)(?:$|[^0-9])/);
+  return year ? Number(year[1]) * 10000 : null;
+}
+
+function hasEpisodeNumber(item) {
+  const { season, episode } = episodeCoordinates(item);
+  return season !== null || episode !== null;
 }
 
 function compareEpisodeOrder(left, right) {
@@ -66,6 +97,7 @@ function compareEpisodeOrder(left, right) {
   const b = episodeCoordinates(right);
   if (a.season !== null && b.season !== null && a.season !== b.season) return a.season - b.season;
   if (a.episode !== null && b.episode !== null && a.episode !== b.episode) return a.episode - b.episode;
+  if (a.aired !== null && b.aired !== null && a.aired !== b.aired) return a.aired - b.aired;
   const titleOrder = a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' });
   return titleOrder || String(left?.path || '').localeCompare(String(right?.path || ''), undefined, { numeric: true, sensitivity: 'base' });
 }
@@ -76,7 +108,9 @@ function createChannelRound(shows, previousState = {}, random = Math.random) {
     .map(show => ({
       path: show.path,
       name: String(show.name || path.basename(show.path)),
-      episodes: [...show.episodes].sort(compareEpisodeOrder)
+      episodes: [...show.episodes].sort(compareEpisodeOrder),
+      // Loose videos in the channel folder (music videos, movies, specials) air in random order unless they are numbered episodes.
+      shuffle: show.loose === true && show.episodes.length > 1 && !show.episodes.every(hasEpisodeNumber)
     }));
   const validShows = new Set(usable.map(show => show.path));
   const isOrderedState = previousState.episodeOrderVersion === EPISODE_ORDER_VERSION;
@@ -86,17 +120,23 @@ function createChannelRound(shows, previousState = {}, random = Math.random) {
   const lastByShow = Object.fromEntries(Object.entries(isOrderedState ? previousState.lastEpisodeByShow || {} : {})
     .filter(([showPath, filePath]) => validShows.has(showPath) && usable.find(show => show.path === showPath)?.episodes.some(item => item.path === filePath)));
   const queue = [];
-  for (const show of shuffled(usable, random)) {
+  // Show order is reshuffled every round; the show that just aired never opens the next round.
+  const order = shuffled(usable, random);
+  if (order.length > 1 && order[0].path === previousState.lastShowPath) order.push(order.shift());
+  for (const show of order) {
     let bag = bags[show.path] || [];
     if (!bag.length) {
       bag = show.episodes.map(item => item.path);
       const lastIndex = show.episodes.findIndex(item => item.path === lastByShow[show.path]);
-      if (lastIndex >= 0) {
+      if (!show.shuffle && lastIndex >= 0) {
         const nextIndex = (lastIndex + 1) % show.episodes.length;
         bag = [...show.episodes.slice(nextIndex), ...show.episodes.slice(0, nextIndex)].map(item => item.path);
       }
     }
-    const episodePath = bag.shift();
+    // Shows play their episodes in order; loose videos draw at random until every one has aired.
+    let draw = show.shuffle ? Math.min(bag.length - 1, Math.floor(Math.max(0, Number(random()) || 0) * bag.length)) : 0;
+    if (show.shuffle && bag.length > 1 && bag[draw] === lastByShow[show.path]) draw = (draw + 1) % bag.length;
+    const episodePath = bag.splice(draw, 1)[0];
     bags[show.path] = bag;
     lastByShow[show.path] = episodePath;
     const episode = show.episodes.find(item => item.path === episodePath);
@@ -108,7 +148,8 @@ function createChannelRound(shows, previousState = {}, random = Math.random) {
     queue,
     cursor: 0,
     episodeBags: bags,
-    lastEpisodeByShow: lastByShow
+    lastEpisodeByShow: lastByShow,
+    lastShowPath: queue.at(-1)?.showPath || previousState.lastShowPath || ''
   };
 }
 
@@ -131,6 +172,7 @@ function restoreChannelQueue(shows, savedState = {}) {
 
 const AD_SECONDS_PER_PROGRAM_SECOND = 11 / 49;
 const MAX_CHANNEL_UNINTERRUPTED_PROGRAM_SECONDS = 14 * 60;
+const MIN_MIDROLL_PROGRAM_SECONDS = 8 * 60;
 const MIN_COMMERCIALS_PER_BREAK = 2;
 const MAX_BROADCAST_ROUNDS_PER_REQUEST = 1000;
 const RECENT_CHANNEL_ADS_TO_AVOID = 8;
@@ -208,8 +250,8 @@ function createBroadcastSchedule(shows, commercials, previousState = {}, minimum
       if (!(programDuration > 0)) continue;
       programGroupIndex += 1;
       const regularSegmentCount = Math.max(1, Math.ceil(programDuration / MAX_CHANNEL_UNINTERRUPTED_PROGRAM_SECONDS));
-      // Keep one mid-roll and one episode-end break even for a short episode.
-      const segmentCount = hasCommercials ? Math.max(2, regularSegmentCount) : regularSegmentCount;
+      // Episodes of eight minutes or more keep a mid-roll; shorter programmes (music videos, shorts) air whole.
+      const segmentCount = hasCommercials && programDuration >= MIN_MIDROLL_PROGRAM_SECONDS ? Math.max(2, regularSegmentCount) : regularSegmentCount;
       let sourceStartSeconds = 0;
       for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
         const sourceEndSeconds = segmentIndex === segmentCount - 1
@@ -253,10 +295,43 @@ function createBroadcastSchedule(shows, commercials, previousState = {}, minimum
     episodeOrderVersion: rotation.episodeOrderVersion || EPISODE_ORDER_VERSION,
     episodeBags: rotation.episodeBags || {},
     lastEpisodeByShow: rotation.lastEpisodeByShow || {},
+    lastShowPath: rotation.lastShowPath || '',
     lastCommercialPath,
     commercialBagPaths,
     recentCommercialPaths
   };
+}
+
+function programSegmentsMissingBreaks(upcoming) {
+  const queue = Array.isArray(upcoming) ? upcoming : [];
+  const indexes = [];
+  for (let index = 0; index < queue.length; index += 1) {
+    if (queue[index]?.segmentType !== 'program') continue;
+    if (queue[index + 1]?.segmentType !== 'commercial') indexes.push(index);
+  }
+  return indexes;
+}
+
+// Queues saved before a channel had ads (or before its reels were split) keep
+// their programmes; this slots a rotated break after each uninterrupted segment.
+function fillMissingCommercialBreaks(upcoming, commercials, previousState = {}, random = Math.random) {
+  let lastCommercialPath = typeof previousState?.lastCommercialPath === 'string' ? previousState.lastCommercialPath : '';
+  let commercialBagPaths = Array.isArray(previousState?.commercialBagPaths) ? previousState.commercialBagPaths : [];
+  let recentCommercialPaths = Array.isArray(previousState?.recentCommercialPaths) ? previousState.recentCommercialPaths : [];
+  const breaks = [];
+  for (const index of programSegmentsMissingBreaks(upcoming)) {
+    const block = createCommercialSegments(commercials, Number(upcoming[index].durationSeconds) * AD_SECONDS_PER_PROGRAM_SECOND, random, {
+      lastCommercialPath,
+      commercialBagPaths,
+      recentCommercialPaths
+    });
+    if (!block.segments.length) break;
+    breaks.push({ afterIndex: index, segments: block.segments });
+    lastCommercialPath = block.lastPath;
+    commercialBagPaths = block.commercialBagPaths;
+    recentCommercialPaths = block.recentCommercialPaths;
+  }
+  return { breaks, lastCommercialPath, commercialBagPaths, recentCommercialPaths };
 }
 
 function locateBroadcastSegment(queue, elapsedSeconds) {
@@ -281,6 +356,7 @@ function randomBroadcastOffset(totalDurationSeconds, random = Math.random) {
 }
 
 const MAX_CHANNEL_QUEUE_ENTRIES = 6000;
+const SAVED_BREAK_CUT_KINDS = new Set(['black', 'silence', 'lull', 'nominal']);
 const MAX_CHANNEL_PLAY_HISTORY = 1000;
 function reconcileChannelPlayback(shows, commercials, savedState = {}) {
   const mediaByPath = new Map();
@@ -349,7 +425,11 @@ function reconcileChannelPlayback(shows, commercials, savedState = {}) {
         sequence,
         programSequence: Math.max(0, Math.trunc(Number(saved.programSequence) || 0)),
         breakSequence: Math.max(0, Math.trunc(Number(saved.breakSequence) || 0)),
-        adBreakPosition: Math.max(0, Math.trunc(Number(saved.adBreakPosition) || 0))
+        adBreakPosition: Math.max(0, Math.trunc(Number(saved.adBreakPosition) || 0)),
+        ...(segmentType === 'program' && Number(saved.breakTargetSeconds) > 0 ? { breakTargetSeconds: Number(saved.breakTargetSeconds) } : {}),
+        ...(segmentType === 'program' && SAVED_BREAK_CUT_KINDS.has(saved.startCutKind) ? { startCutKind: saved.startCutKind } : {}),
+        ...(segmentType === 'program' && SAVED_BREAK_CUT_KINDS.has(saved.endCutKind) ? { endCutKind: saved.endCutKind } : {}),
+        ...(segmentType === 'program' && Number(saved.cutVersion) > 0 ? { cutVersion: Number(saved.cutVersion) } : {})
         });
         if (oldElapsed < oldStart) newCursor += durationSeconds;
       }
@@ -437,8 +517,28 @@ async function findVideoFiles(root, folder) {
   return files.sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
 }
 
+// Channel folders may start with a number that sets their order on the dial ("9_Disney", "4_ 666"); the number is not
+// part of the channel's name.
+const CHANNEL_ORDER_PREFIX = /^\s*(\d+)\s*[_.)-]\s*/;
+function channelDisplayName(rootPath) {
+  const folder = path.basename(String(rootPath || '')).trim();
+  return folder.replace(CHANNEL_ORDER_PREFIX, '').trim() || folder;
+}
+function channelIdentity(rootPath) {
+  return channelDisplayName(rootPath).toLocaleLowerCase('en-US');
+}
+function channelOrderNumber(rootPath) {
+  const match = path.basename(String(rootPath || '')).match(CHANNEL_ORDER_PREFIX);
+  return match ? Number(match[1]) : Infinity;
+}
+function compareChannelFolders(left, right) {
+  const order = channelOrderNumber(left.root) - channelOrderNumber(right.root);
+  if (order) return order;
+  return String(left.name || '').localeCompare(String(right.name || ''), undefined, { numeric: true, sensitivity: 'base' });
+}
+
 function isMovieOnlyChannel(rootPath) {
-  return ['hbo', '666'].includes(path.basename(String(rootPath || '')).trim().toLocaleLowerCase('en-US'));
+  return ['hbo', '666'].includes(channelIdentity(rootPath));
 }
 
 function isMovieExtraPath(root, filePath) {
@@ -452,8 +552,8 @@ async function isChannelFolder(rootPath) {
   if (!root || !(await fs.stat(root).catch(() => null))?.isDirectory()) return false;
   const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
   const movieOnly = isMovieOnlyChannel(root);
-  if (movieOnly && entries.some(entry => entry.isFile() && VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())
-    && !isMovieExtraPath(root, path.join(root, entry.name)))) return true;
+  if (entries.some(entry => entry.isFile() && !entry.name.startsWith('.') && VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())
+    && (!movieOnly || !isMovieExtraPath(root, path.join(root, entry.name))))) return true;
   const showFolders = entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.')
     && entry.name.toLocaleLowerCase('en-US') !== 'commercials'
     && (!movieOnly || !isMovieExtraPath(root, path.join(root, entry.name))));
@@ -473,7 +573,17 @@ async function discoverAdjacent666Channel(channelsRootPath) {
   const expectedParent = path.dirname(channelsRoot);
   const root = await fs.realpath(path.join(expectedParent, '666')).catch(() => null);
   if (!root || path.dirname(root) !== expectedParent || !isMovieOnlyChannel(root) || !(await isChannelFolder(root))) return null;
-  return { root, name: path.basename(root) };
+  return { root, name: channelDisplayName(root) };
+}
+
+// Comedy Central shares the 00s channel's commercials, wherever the dial puts either of them.
+async function findSharedDecadeRoot(root) {
+  const parent = path.dirname(root);
+  const entries = await fs.readdir(parent, { withFileTypes: true }).catch(() => []);
+  const entry = entries.find(item => item.isDirectory() && channelIdentity(item.name) === '00s');
+  if (!entry) return null;
+  const decadeRoot = await fs.realpath(path.join(parent, entry.name)).catch(() => null);
+  return decadeRoot && path.dirname(decadeRoot) === parent && channelIdentity(decadeRoot) === '00s' ? decadeRoot : null;
 }
 
 async function resolveChannelCommercialsRoot(rootPath) {
@@ -481,12 +591,9 @@ async function resolveChannelCommercialsRoot(rootPath) {
   const root = await fs.realpath(rootPath).catch(() => null);
   if (!root) return null;
   let candidate = null;
-  if (path.basename(root).trim().toLocaleLowerCase('en-US') === 'comedy central') {
-    const sharedDecadeRoot = await fs.realpath(path.join(path.dirname(root), '00s')).catch(() => null);
-    if (sharedDecadeRoot && path.dirname(sharedDecadeRoot) === path.dirname(root)
-      && path.basename(sharedDecadeRoot).toLocaleLowerCase('en-US') === '00s') {
-      candidate = path.join(sharedDecadeRoot, 'Commercials');
-    }
+  if (channelIdentity(root) === 'comedy central') {
+    const sharedDecadeRoot = await findSharedDecadeRoot(root);
+    if (sharedDecadeRoot) candidate = path.join(sharedDecadeRoot, 'Commercials');
   } else {
     const entries = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
     const local = entries.find(entry => entry.isDirectory() && entry.name.toLocaleLowerCase('en-US') === 'commercials');
@@ -496,8 +603,8 @@ async function resolveChannelCommercialsRoot(rootPath) {
   const commercialsRoot = await fs.realpath(candidate).catch(() => null);
   const rootStat = commercialsRoot ? await fs.stat(commercialsRoot).catch(() => null) : null;
   if (!commercialsRoot || !rootStat?.isDirectory() || path.basename(commercialsRoot).toLocaleLowerCase('en-US') !== 'commercials') return null;
-  if (path.basename(root).trim().toLocaleLowerCase('en-US') === 'comedy central') {
-    const decadeRoot = await fs.realpath(path.join(path.dirname(root), '00s')).catch(() => null);
+  if (channelIdentity(root) === 'comedy central') {
+    const decadeRoot = await findSharedDecadeRoot(root);
     if (!decadeRoot || path.dirname(commercialsRoot) !== decadeRoot) return null;
   } else if (!insideRoot(root, commercialsRoot)) return null;
   return commercialsRoot;
@@ -554,6 +661,17 @@ async function scanChannelFolder(rootPath, { registerMedia, probeDuration = asyn
       const episode = (await registerFiles([realPath], path.basename(realPath, path.extname(realPath)), true)).filter(Boolean)[0];
       if (episode) shows.push({ name: episode.showName || path.basename(realPath), path: realPath, episodes: [episode] });
     }
+  } else {
+    // Loose videos in the channel folder itself air as one programme block named after the channel.
+    const loosePaths = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || entry.name.startsWith('.') || !VIDEO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+      const realPath = await fs.realpath(path.join(root, entry.name)).catch(() => null);
+      if (realPath && path.dirname(realPath) === root) loosePaths.push(realPath);
+    }
+    const episodes = (await registerFiles(loosePaths, channelDisplayName(root), true)).filter(Boolean)
+      .sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: 'base' }));
+    if (episodes.length) shows.push({ name: channelDisplayName(root), path: root, episodes });
   }
 
   let commercials = [];
@@ -565,7 +683,7 @@ async function scanChannelFolder(rootPath, { registerMedia, probeDuration = asyn
   }
   return {
     root,
-    name: path.basename(root),
+    name: channelDisplayName(root),
     movieOnly,
     commercialsRoot,
     shows,
@@ -577,14 +695,22 @@ async function scanChannelFolder(rootPath, { registerMedia, probeDuration = asyn
 }
 
 module.exports = {
+  channelDisplayName,
+  channelIdentity,
+  channelOrderNumber,
+  compareChannelFolders,
   VIDEO_EXTENSIONS,
   selectDirectChannelCommercialSources,
+  isCommercialReel,
+  isChannelReadyClip,
   createChannelRound,
   restoreChannelQueue,
   createBroadcastSchedule,
   locateBroadcastSegment,
   randomBroadcastOffset,
   reconcileChannelPlayback,
+  fillMissingCommercialBreaks,
+  programSegmentsMissingBreaks,
   scanChannelFolder,
   isMovieOnlyChannel,
   isChannelFolder,

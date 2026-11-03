@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.35, maximum-scale=4, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="TV Remote">
+  <meta name="theme-color" content="#1b1a19">
+  <link rel="apple-touch-icon" href="/remote/icon.png">
+  <link rel="stylesheet" href="/remote/remote.css">
+  <title>Saturday Tube Remote</title>
+</head>
+<body>
+  <div class="remote-workspace">
+  <main class="remote" aria-label="Saturday Tube remote control">
+    <section class="top-cluster" aria-label="Inputs">
+      <div class="oval-row">
+        <label class="oval-key"><span>TV</span><button type="button" data-action="input-tv" aria-label="TV input"></button></label>
+        <label class="oval-key raised"><span>VCR</span><button type="button" data-action="input-vcr" aria-label="VCR input"></button></label>
+        <label class="oval-key raised"><span>SHELF</span><button type="button" data-action="shelf" aria-label="Tape shelf"></button></label>
+        <label class="oval-key"><span>SETUP</span><button type="button" data-action="menu" aria-label="Settings menu"></button></label>
+      </div>
+      <div class="input-row">
+        <button class="key round red power-key" type="button" data-action="power" aria-label="TV power" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9M7 5.5a8 8 0 1 0 10 0"/></svg>
+        </button>
+        <button class="pill red" type="button" data-action="input-cycle">INPUT</button>
+        <button class="key round dark fs-key" id="fullscreenKey" type="button" data-action="fullscreen" aria-label="Change fullscreen view; currently window" title="Change fullscreen view; currently window">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5m11-5h5v5M4 15v5h5m6 0h5v-5"/></svg>
+          <span id="fullscreenMode" aria-hidden="true"></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="genesis-gamepad" id="genesisGamepad" aria-label="Genesis game controller" hidden>
+      <header class="gamepad-heading"><span>GENESIS AUX</span><output id="gameTitle">GAME READY</output></header>
+      <div class="gamepad-shoulders">
+        <button type="button" data-game-button="l2" aria-label="L2 · Mode">L2</button>
+        <button type="button" data-game-button="l1" aria-label="L1 · X">L1</button>
+        <span>6-BUTTON PAD</span>
+        <button type="button" data-game-button="r1" aria-label="R1 · Y">R1</button>
+        <button type="button" data-game-button="r2" aria-label="R2 · Mode">R2</button>
+      </div>
+      <div class="gamepad-deck">
+        <div class="gamepad-side left-side">
+          <div class="game-dpad" aria-label="D-pad">
+            <button type="button" data-game-button="up" aria-label="D-pad up">▲</button>
+            <button type="button" data-game-button="left" aria-label="D-pad left">◀</button>
+            <span aria-hidden="true">✣</span>
+            <button type="button" data-game-button="right" aria-label="D-pad right">▶</button>
+            <button type="button" data-game-button="down" aria-label="D-pad down">▼</button>
+          </div>
+          <div class="stick-row"><div class="analog-stick" data-stick="left" aria-label="Left analog stick"><i></i></div><button class="stick-click" type="button" data-game-button="l3" aria-label="Left stick click · Start">L3</button></div>
+        </div>
+        <div class="gamepad-center">
+          <button class="gamepad-select" type="button" data-game-button="select" aria-label="Select · Mode">SELECT</button>
+          <button class="gamepad-start" type="button" data-game-button="start" aria-label="Start">START</button>
+          <div class="game-face-buttons" aria-label="Face buttons">
+            <button class="face triangle" type="button" data-game-button="triangle" aria-label="Triangle · Genesis X">△</button>
+            <button class="face square" type="button" data-game-button="square" aria-label="Square · Genesis B">□</button>
+            <button class="face cross" type="button" data-game-button="cross" aria-label="Cross · Genesis A">×</button>
+            <button class="face circle" type="button" data-game-button="circle" aria-label="Circle · Genesis C">○</button>
+          </div>
+        </div>
+        <div class="gamepad-side right-side">
+          <div class="analog-stick" data-stick="right" aria-label="Right analog stick"><i></i></div>
+          <button class="stick-click" type="button" data-game-button="r3" aria-label="Right stick click · Mode">R3</button>
+        </div>
+      </div>
+      <footer class="gamepad-bottom"><small>STICKS → D-PAD · L1 / R1 → X / Y · L2 / R2 → MODE</small><button class="gamepad-home" type="button" data-action="input-vcr" aria-label="Home · return to video input">HOME</button></footer>
+    </section>
+    <section class="genesis-no-game" id="genesisNoGame" hidden><strong>AUX · NO CARTRIDGE</strong><small>Load a Genesis game on the TV, then reconnect here.</small><button class="pill white" type="button" data-action="input-vcr">RETURN TO VIDEO</button></section>
+
+    <section class="inset transport" aria-label="Tape transport">
+      <output class="lcd" id="lcd" aria-live="polite">
+        <i class="led" id="led" aria-hidden="true"></i>
+        <span class="lcd-main" id="lcdMain">SATURDAY</span>
+        <span class="lcd-sub" id="lcdSub">TUBE</span>
+      </output>
+      <div class="key-row">
+        <button class="key dark" type="button" data-action="rew" data-repeat aria-label="Rewind">◀◀</button>
+        <button class="key dark wide" type="button" data-action="play" aria-label="Play or pause">▶ ❚❚</button>
+        <button class="key dark" type="button" data-action="ff" data-repeat aria-label="Fast forward">▶▶</button>
+      </div>
+      <div class="key-row room-row">
+        <button class="key round dark" type="button" data-action="prev" aria-label="Previous tape">⏮</button>
+        <label class="mini"><button class="key round dark room-key" type="button" data-action="scene-next" aria-label="Enter virtual room or change room"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11 12 3l9 8M5 10v11h5v-7h4v7h5V10"/></svg></button><span>ROOM</span></label>
+        <button class="key round dark" type="button" data-action="next" aria-label="Next tape">⏭</button>
+      </div>
+    </section>
+
+    <section class="color-row" aria-label="Tape shelf">
+      <label class="mini"><span>ADD</span><button class="key dot yellow" type="button" data-action="add" aria-label="Select tape on the shelf">A</button></label>
+      <label class="mini"><span>QUEUE</span><button class="key dot blue" type="button" data-action="queue" aria-label="Add selected tapes to the playlist">B</button></label>
+      <label class="mini"><span>INFO</span><button class="key dot red" type="button" data-action="info" aria-label="Show what's on">C</button></label>
+    </section>
+
+    <section class="fx-row" aria-label="Effects">
+      <button class="key dark fx-key" id="videoFxKey" type="button" data-action="video-fx" aria-pressed="true" aria-label="Video effects on; press to bypass the picture filters"><i class="fx-led" aria-hidden="true"></i>VIDEO FX</button>
+      <button class="key dark fx-key" id="audioFxKey" type="button" data-action="audio-fx" aria-pressed="true" aria-label="Audio effects on; press to bypass the audio effects"><i class="fx-led" aria-hidden="true"></i>AUDIO FX</button>
+    </section>
+    <section class="look-row" aria-label="Picture look">
+      <label class="mini"><span>SCREEN</span><button class="key dark look-key" id="screenTypeKey" type="button" data-action="screen-type" aria-label="Switch between CRT and rear projection; currently CRT">CRT</button></label>
+      <label class="mini"><span>COLOR</span><button class="key dark look-key" id="colorFilterKey" type="button" data-action="color-filter" aria-label="Next color filter; currently color">COLOR</button></label>
+      <label class="mini"><span>SKIN</span><button class="key round dark skin-key" id="skinKey" type="button" data-action="skin-random" aria-label="Paint the TV cabinet a random color"><i class="skin-swatch" aria-hidden="true"></i></button></label>
+    </section>
+
+    <section class="nav-cluster" aria-label="Menu navigation">
+      <div class="dpad">
+        <button class="arrow up" type="button" data-action="up" data-repeat aria-label="Up">▲</button>
+        <button class="arrow left" type="button" data-action="left" data-repeat aria-label="Left">◀</button>
+        <button class="ok" type="button" data-action="ok"><b>OK</b><small>Select</small></button>
+        <button class="arrow right" type="button" data-action="right" data-repeat aria-label="Right">▶</button>
+        <button class="arrow down" type="button" data-action="down" data-repeat aria-label="Down">▼</button>
+      </div>
+      <label class="page-key prev"><span>PAGE</span><button class="key round dark" type="button" data-action="page-prev" data-repeat="slow" aria-label="Previous page">◀</button></label>
+      <label class="page-key next"><span>PAGE</span><button class="key round dark" type="button" data-action="page-next" data-repeat="slow" aria-label="Next page">▶</button></label>
+      <button class="pill red corner guide" type="button" data-action="guide">Guide</button>
+      <button class="pill red corner menu" type="button" data-action="menu">Menu</button>
+    </section>
+
+    <section class="exit-row">
+      <button class="pill white" type="button" data-action="back">Exit</button>
+      <button class="pill white" type="button" data-action="info">Info</button>
+      <button class="pill white" type="button" data-action="ch-last">Last</button>
+    </section>
+
+    <section class="rocker-row" aria-label="Volume and channel">
+      <div class="rocker">
+        <button type="button" data-action="vol-up" data-repeat aria-label="Volume up">+</button>
+        <b>VOL</b>
+        <button type="button" data-action="vol-down" data-repeat aria-label="Volume down">−</button>
+      </div>
+      <button class="key round dark small-text" type="button" data-action="mute">Mute</button>
+      <div class="rocker">
+        <button type="button" data-action="ch-up" data-repeat="slow" aria-label="Channel up">▲</button>
+        <b>CH</b>
+        <button type="button" data-action="ch-down" data-repeat="slow" aria-label="Channel down">▼</button>
+      </div>
+    </section>
+
+    <section class="inset numpad" aria-label="Channel number">
+      <button class="key num" type="button" data-action="digit" data-value="1">1</button>
+      <button class="key num" type="button" data-action="digit" data-value="2">2</button>
+      <button class="key num" type="button" data-action="digit" data-value="3">3</button>
+      <button class="key num" type="button" data-action="digit" data-value="4">4</button>
+      <button class="key num" type="button" data-action="digit" data-value="5">5</button>
+      <button class="key num" type="button" data-action="digit" data-value="6">6</button>
+      <button class="key num" type="button" data-action="digit" data-value="7">7</button>
+      <button class="key num" type="button" data-action="digit" data-value="8">8</button>
+      <button class="key num" type="button" data-action="digit" data-value="9">9</button>
+      <label class="mini"><span>Input</span><button class="key round dark small-text" type="button" data-action="input-cycle">TV/VCR</button></label>
+      <button class="key num" type="button" data-action="digit" data-value="0">0</button>
+      <label class="mini"><span>Enter</span><button class="key round dark small-text" type="button" data-action="enter">ENT</button></label>
+    </section>
+
+    <div class="remote-foot">
+      <button class="key round dark flip-key" id="flipKey" type="button" aria-label="Flip the remote over to the analog controls" title="Flip to the analog controls">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 0 1 14-3l2 2M20 15a8 8 0 0 1-14 3l-2-2M20 4v4h-4M4 20v-4h4"/></svg>
+      </button>
+      <footer class="brand" id="brand"><span class="swoosh">(</span>saturday tube<small>®</small></footer>
+      <button class="key round dark settings-key" id="remoteSettingsKey" type="button" aria-label="Remote settings" aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 5.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6Zm6.4 3.9-1.4-.3a5 5 0 0 1-.5 1.2l.8 1.2-1.4 1.4-1.2-.8a5 5 0 0 1-1.2.5l-.3 1.4H7.2l-.3-1.4a5 5 0 0 1-1.2-.5l-1.2.8-1.4-1.4.8-1.2a5 5 0 0 1-.5-1.2l-1.4-.3V6.9l1.4-.3c.1-.4.3-.8.5-1.2l-.8-1.2 1.4-1.4 1.2.8c.4-.2.8-.4 1.2-.5l.3-1.4h1.6l.3 1.4c.4.1.8.3 1.2.5l1.2-.8 1.4 1.4-.8 1.2c.2.4.4.8.5 1.2l1.4.3Z"/></svg>
+      </button>
+    </div>
+  </main>
+  <main class="remote-back" id="remoteBack" aria-label="Back of the remote: analog controls">
+    <header class="back-heading"><b>ANALOG CONTROLS</b><small id="backStatus">WAITING FOR TV</small></header>
+    <div class="back-groups" id="backGroups"></div>
+    <button class="back-flip" id="backFlipKey" type="button" aria-label="Flip the remote back to the buttons">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 0 1 14-3l2 2M20 15a8 8 0 0 1-14 3l-2-2M20 4v4h-4M4 20v-4h4"/></svg> FLIP
+    </button>
+  </main>
+  <output id="trackpadStatus" aria-live="polite"></output>
+  </div>
+  <output class="mirror-badge" id="mirrorBadge" aria-live="polite"></output>
+  <section class="remote-settings" id="remoteSettings" role="dialog" aria-modal="true" aria-labelledby="remoteSettingsTitle" hidden>
+    <div class="remote-settings-card">
+      <h2 id="remoteSettingsTitle">REMOTE SETTINGS</h2>
+      <label class="setting-row" for="darknessSlider">
+        <span>DARKNESS</span>
+        <output id="darknessReadout" for="darknessSlider">AUTO</output>
+      </label>
+      <input id="darknessSlider" type="range" min="0" max="100" step="1" value="100" aria-describedby="darknessHint">
+      <div class="setting-scale" aria-hidden="true"><span>LIGHT ROOM</span><span>DARK ROOM</span></div>
+      <label class="setting-toggle"><input id="darknessAuto" type="checkbox"> <span>AUTO (LIGHT SENSOR / TIME OF DAY)</span></label>
+      <p id="darknessHint">Higher hides more of the remote so only the keys show. Keys always light up when pressed.</p>
+      <label class="setting-row" for="sizeSlider">
+        <span>REMOTE SIZE</span>
+        <output id="sizeReadout" for="sizeSlider">WHOLE</output>
+      </label>
+      <input id="sizeSlider" type="range" min="0" max="100" step="1" value="0" aria-describedby="sizeHint">
+      <div class="setting-scale" aria-hidden="true"><span>WHOLE REMOTE</span><span>FILL WIDTH</span></div>
+      <p id="sizeHint">The space around the remote is a trackpad for the TV: drag to move the pointer, tap to click, two fingers to scroll or pinch to zoom.</p>
+      <button class="remote-settings-done" id="remoteSettingsDone" type="button">DONE</button>
+    </div>
+  </section>
+  <div class="pair-again" id="pairAgain" hidden>
+    <strong>REMOTE NOT PAIRED</strong>
+    <p>On the TV open <b>SETUP → REMOTE</b> and scan the QR code with this phone's camera.</p>
+  </div>
+  <div class="sleep-veil" id="sleepVeil" aria-hidden="true"><span>TAP TO WAKE</span></div>
+  <video class="keep-awake" id="keepAwake" src="/remote/keepawake.mp4" muted playsinline loop preload="auto" aria-hidden="true" tabindex="-1"></video>
+  <script src="/remote/remote.js"></script>
+  <script src="/remote/trackpad.js"></script>
+</body>
+</html>

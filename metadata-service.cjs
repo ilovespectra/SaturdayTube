@@ -24,6 +24,18 @@ function parseMetadataFilename(filename) {
   const basename = original.replace(/\.[^.]+$/, '');
   const year = (basename.match(YEAR_PATTERN) || [])[1] || '';
   const withoutRelease = basename.replace(RELEASE_TAG, ' ');
+  // PBS uses this descriptive alias; exact episode-title evidence distinguishes the 1997 series.
+  const franklinFullEpisode = /^Franklin the Turtle\s*[-–—]\s*(.+?)\s*[-–—]\s*FULL EPISODE\b/i.exec(withoutRelease);
+  if (franklinFullEpisode) {
+    const series = 'Franklin';
+    const episodeTitle = cleanTitle(franklinFullEpisode[1]);
+    return { filename: original, basename, query: series, displayTitle: series, year, seriesYear: '', mode: 'series', series, episodeCode: '', episodeTitle };
+  }
+  const fullEpisode = /^(.*?)\s+FULL EPISODE\b/i.exec(withoutRelease);
+  if (fullEpisode) {
+    const series = cleanTitle(fullEpisode[1]);
+    if (series) return { filename: original, basename, query: series, displayTitle: series, year, seriesYear: SERIES_PREMIERE_HINTS.get(normalizeMetadataTitle(series)) || '', mode: 'series', series, episodeCode: '', episodeTitle: '' };
+  }
   const seasonEpisode = /^(.*?)\bS(\d{1,2})[ ._-]*E(\d{1,2})([A-Z])?\b([\s\S]*)$/i.exec(withoutRelease);
   const numericEpisode = seasonEpisode ? null : /^(.*?)\b(\d{1,2})x(\d{2})([A-Z])?\b([\s\S]*)$/i.exec(withoutRelease);
   const simpleEpisode = seasonEpisode || numericEpisode;
@@ -57,6 +69,14 @@ function cleanWikipediaTitle(value) {
   return String(value || '').replace(/\s+\([^()]*\)\s*$/, '').trim();
 }
 
+function isExactWikipediaPageTitle(title, wanted) {
+  const raw = String(title || '').trim();
+  if (normalizeMetadataTitle(raw) === wanted) return true;
+  const disambiguated = /^(.*?)\s+\(([^()]*)\)\s*$/.exec(raw);
+  if (!disambiguated || !/^(?:(?:19|20)\d{2}\s+)?(?:(?:animated|television|feature|short)\s+)?(?:film|movie)$/i.test(disambiguated[2].trim())) return false;
+  return normalizeMetadataTitle(disambiguated[1]) === wanted;
+}
+
 function exactTvMazeCandidates(results, query) {
   const wanted = normalizeMetadataTitle(query);
   const exact = (Array.isArray(results) ? results : []).filter(result => {
@@ -78,8 +98,8 @@ function findStrictTvMazeMatch(results, query, year = '') {
 async function findTvMazeEpisodeMatch(results, request, fetchJson) {
   const candidates = exactTvMazeCandidates(results, request.query);
   const code = /^S(\d{2})E(\d{2})[A-Z]?$/.exec(String(request.episodeCode || '').toUpperCase());
-  const episodeTitle = normalizeMetadataTitle(request.episodeTitle);
-  if (candidates.length < 2 || (!code && !episodeTitle)) return null;
+  const episodeTitles = String(request.episodeTitle || '').split(/[\/|⧸]+/u).map(normalizeMetadataTitle).filter(Boolean);
+  if (candidates.length < 2 || (!code && !episodeTitles.length)) return null;
 
   const evidence = await Promise.all(candidates.map(async result => {
     if (!Number.isInteger(Number(result.show.id))) return null;
@@ -87,8 +107,8 @@ async function findTvMazeEpisodeMatch(results, request, fetchJson) {
     if (!Array.isArray(episodes)) return null;
     const matched = episodes.some(episode => {
       if (code && (Number(episode.season) !== Number(code[1]) || Number(episode.number) !== Number(code[2]))) return false;
-      if (!episodeTitle) return true;
-      return String(episode.name || '').split(/[\/|]+/).some(part => normalizeMetadataTitle(part) === episodeTitle);
+      if (!episodeTitles.length) return true;
+      return String(episode.name || '').split(/[\/|⧸]+/u).some(part => episodeTitles.includes(normalizeMetadataTitle(part)));
     });
     return matched ? result : null;
   }));
@@ -99,7 +119,7 @@ async function findTvMazeEpisodeMatch(results, request, fetchJson) {
 function findStrictWikipediaPage(pages, query, year = '') {
   const wanted = normalizeMetadataTitle(query);
   const exactTitle = (Array.isArray(pages) ? pages : []).filter(page =>
-    page?.title && normalizeMetadataTitle(cleanWikipediaTitle(page.title)) === wanted
+    page?.title && isExactWikipediaPageTitle(page.title, wanted)
   );
   if (!year) return exactTitle.length === 1 ? exactTitle[0] : null;
   // Search excerpts often mention a film's year while describing a franchise,
@@ -171,7 +191,10 @@ async function lookupMetadata(input, fetchJson) {
 function metadataCacheKey(filename) {
   const parsed = parseMetadataFilename(filename);
   const query = normalizeMetadataTitle(parsed.query);
-  return [parsed.mode, query, parsed.year, parsed.seriesYear, parsed.episodeCode, parsed.episodeTitle && normalizeMetadataTitle(parsed.episodeTitle)].filter(Boolean).join(':');
+  const mode = parsed.mode === 'series' ? 'series' : 'title';
+  // Refresh stale film misses after tightening exact Wikipedia-page identity matching.
+  const titleMatcherVersion = mode === 'title' ? 'v2' : '';
+  return [mode, titleMatcherVersion, query, parsed.year, parsed.seriesYear, parsed.episodeCode, parsed.episodeTitle && normalizeMetadataTitle(parsed.episodeTitle)].filter(Boolean).join(':');
 }
 
 module.exports = {

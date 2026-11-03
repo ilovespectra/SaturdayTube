@@ -178,8 +178,8 @@ test('long programs receive shuffled breaks before 15 minutes and resume within 
 
 test('short TV episodes get a scaled mid-roll and an episode-end break', () => {
   const shows = [
-    { name: 'Short A', path: '/tv/A', episodes: [{ path: '/tv/A/1.mp4', durationSeconds: 90 }] },
-    { name: 'Short B', path: '/tv/B', episodes: [{ path: '/tv/B/1.mp4', durationSeconds: 120 }] },
+    { name: 'Short A', path: '/tv/A', episodes: [{ path: '/tv/A/1.mp4', durationSeconds: 480 }] },
+    { name: 'Short B', path: '/tv/B', episodes: [{ path: '/tv/B/1.mp4', durationSeconds: 600 }] },
     { name: 'Short C', path: '/tv/C', episodes: [{ path: '/tv/C/1.mp4', durationSeconds: 840 }] }
   ];
   const ads = [{ path: '/tv/Commercials/whole.mp4', title: 'Whole spot', durationSeconds: 8 }];
@@ -189,7 +189,7 @@ test('short TV episodes get a scaled mid-roll and an episode-end break', () => {
   const pieces = programs.map(item => [item.mediaDurationSeconds, item.sourceStartSeconds, item.durationSeconds])
     .sort((left, right) => left[0] - right[0] || left[1] - right[1]);
   assert.deepEqual(pieces, [
-    [90, 0, 45], [90, 45, 45], [120, 0, 60], [120, 60, 60], [840, 0, 420], [840, 420, 420]
+    [480, 0, 240], [480, 240, 240], [600, 0, 300], [600, 300, 300], [840, 0, 420], [840, 420, 420]
   ]);
   for (let index = 0; index < withAds.queue.length; index += 1) {
     if (withAds.queue[index].segmentType === 'program') {
@@ -205,19 +205,30 @@ test('short TV episodes get a scaled mid-roll and an episode-end break', () => {
   assert.equal(withoutAds.queue.filter(item => item.segmentType === 'program').length, 3, 'uninterrupted episodes stay in one piece without ads');
 });
 
+test('programmes under eight minutes air whole with one break afterwards', () => {
+  const shows = [{ name: 'Videos', path: '/tv/Videos', episodes: [{ path: '/tv/Videos/song.mp4', durationSeconds: 300 }] }];
+  const ads = [{ path: '/tv/Commercials/a.mp4', durationSeconds: 10 }, { path: '/tv/Commercials/b.mp4', durationSeconds: 10 }];
+  const schedule = createBroadcastSchedule(shows, ads, {}, 0, makeRandom(9));
+  const programs = schedule.queue.filter(item => item.segmentType === 'program');
+  assert.equal(programs.length, 1, 'a music video is never split mid-song');
+  assert.equal(programs[0].sourceStartSeconds, 0);
+  assert.equal(programs[0].durationSeconds, 300);
+  assert.equal(schedule.queue[schedule.queue.indexOf(programs[0]) + 1]?.segmentType, 'commercial');
+});
+
 test('each available ad break queues two full spots before resuming the same episode', () => {
-  const show = { name: 'Cartoon', path: '/tv/Cartoon', episodes: [{ path: '/tv/Cartoon/short.mp4', durationSeconds: 90 }] };
+  const show = { name: 'Cartoon', path: '/tv/Cartoon', episodes: [{ path: '/tv/Cartoon/short.mp4', durationSeconds: 480 }] };
   const ads = [
-    { path: '/tv/Commercials/a.mp4', durationSeconds: 10 },
-    { path: '/tv/Commercials/b.mp4', durationSeconds: 10 },
-    { path: '/tv/Commercials/c.mp4', durationSeconds: 10 }
+    { path: '/tv/Commercials/a.mp4', durationSeconds: 30 },
+    { path: '/tv/Commercials/b.mp4', durationSeconds: 30 },
+    { path: '/tv/Commercials/c.mp4', durationSeconds: 30 }
   ];
   const schedule = createBroadcastSchedule([show], ads, {}, 0, makeRandom(11));
   const queue = schedule.queue;
   const programSegments = queue.filter(item => item.segmentType === 'program');
   assert.equal(programSegments.length, 2);
   assert.equal(programSegments[0].sourceStartSeconds, 0);
-  assert.equal(programSegments[1].sourceStartSeconds, 45);
+  assert.equal(programSegments[1].sourceStartSeconds, 240);
   for (const [index, program] of programSegments.entries()) {
     const segmentIndex = queue.indexOf(program);
     const nextProgramIndex = index + 1 < programSegments.length ? queue.indexOf(programSegments[index + 1]) : queue.length;
@@ -541,4 +552,69 @@ test('HBO and 666 scan as feature-only channels with no ad or trailer segments',
   });
   assert.equal(sixScanned.movieOnly, true, '666 inherits the no-commercial, no-trailer movie policy when its folder is registered');
   assert.equal(sixScanned.commercialCount, 0);
+});
+
+test('show order is random every round while each show airs its episodes in order', () => {
+  const shows = ['Arthur', 'Doug', 'Hey Arnold', 'Rugrats', 'Ren and Stimpy'].map(name => ({
+    name, path: `/tv/${name}`,
+    episodes: [3, 1, 2].map(number => ({ path: `/tv/${name}/${name} S01E0${number}.mp4`, durationSeconds: 60 }))
+  }));
+  const random = makeRandom(11);
+  let state = {};
+  const orders = new Set();
+  const aired = Object.fromEntries(shows.map(show => [show.path, []]));
+  let previousLast = '';
+  for (let round = 0; round < 6; round += 1) {
+    const next = createChannelRound(shows, state, random);
+    const order = next.queue.map(item => item.showPath);
+    if (previousLast) assert.notEqual(order[0], previousLast, 'the show that just aired does not open the next round');
+    previousLast = order.at(-1);
+    orders.add(order.join('|'));
+    for (const item of next.queue) aired[item.showPath].push(path.basename(item.path));
+    state = next;
+  }
+  assert.ok(orders.size > 1, 'show order changes between rounds');
+  assert.ok([...orders].some(order => order !== shows.map(show => show.path).sort().join('|')), 'show order is not alphabetical');
+  for (const show of shows) {
+    assert.deepEqual(aired[show.path].map(name => name.match(/E0(\d)/)[1]), ['1', '2', '3', '1', '2', '3'], `${show.name} plays in episode order`);
+  }
+});
+
+test('loose videos in the channel folder air in random order without repeats until all have played', () => {
+  const titles = ['ABBA - Waterloo', 'Blondie - Atomic', 'Cher - Believe', 'Devo - Whip It', 'Eurythmics - Sweet Dreams', 'Foreigner - Juke Box Hero'];
+  const loose = { name: 'MTV', path: '/tv/MTV', loose: true, episodes: titles.map(title => ({ path: `/tv/MTV/${title}.mp4`, durationSeconds: 200 })) };
+  const random = makeRandom(5);
+  let state = {};
+  const aired = [];
+  for (let round = 0; round < titles.length * 2; round += 1) {
+    const next = createChannelRound([loose], state, random);
+    aired.push(path.basename(next.queue[0].path, '.mp4'));
+    state = next;
+  }
+  assert.deepEqual([...aired.slice(0, titles.length)].sort(), titles, 'every video airs once per pass');
+  assert.deepEqual([...aired.slice(titles.length)].sort(), titles);
+  assert.notDeepEqual(aired.slice(0, titles.length), titles, 'not alphabetical');
+  assert.notEqual(aired[titles.length], aired[titles.length - 1], 'no back-to-back repeat across passes');
+
+  const numbered = { ...loose, episodes: [3, 1, 2].map(number => ({ path: `/tv/MTV/Unplugged S01E0${number}.mp4`, durationSeconds: 200 })) };
+  state = {};
+  const ordered = [];
+  for (let round = 0; round < 3; round += 1) {
+    const next = createChannelRound([numbered], state, random);
+    ordered.push(path.basename(next.queue[0].path, '.mp4'));
+    state = next;
+  }
+  assert.deepEqual(ordered, ['Unplugged S01E01', 'Unplugged S01E02', 'Unplugged S01E03'], 'numbered loose episodes stay in order');
+});
+
+test('un-numbered episodes air chronologically by air date or year', () => {
+  const show = { name: 'Specials', path: '/tv/Specials', episodes: [
+    { path: '/tv/Specials/Zebra Holiday Special (1981).mp4', durationSeconds: 60 },
+    { path: '/tv/Specials/Arbor Day 1994-04-29.mp4', durationSeconds: 60 },
+    { path: '/tv/Specials/Back to School 1994-09-02.mp4', durationSeconds: 60 },
+    { path: '/tv/Specials/Moon Landing 1969.mp4', durationSeconds: 60 }
+  ] };
+  const schedule = createBroadcastSchedule([show], [], {}, 230, () => 0);
+  assert.deepEqual(schedule.queue.filter(item => item.segmentType === 'program').map(item => path.basename(item.path, '.mp4')),
+    ['Moon Landing 1969', 'Zebra Holiday Special (1981)', 'Arbor Day 1994-04-29', 'Back to School 1994-09-02']);
 });

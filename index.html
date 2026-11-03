@@ -3,12 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' saturday://app; img-src 'self' saturday://app data: https://static.tvmaze.com https://upload.wikimedia.org; media-src saturday://app; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' saturday://app">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' saturday://app; img-src 'self' saturday://app data: https://static.tvmaze.com https://upload.wikimedia.org https://i.ytimg.com; media-src saturday://app; frame-src https://www.youtube.com https://www.youtube-nocookie.com; style-src 'self' 'unsafe-inline'; script-src 'self' https://www.youtube.com; connect-src 'self' saturday://app">
   <title>Saturday Tube</title>
   <link rel="stylesheet" href="saturday://app/styles.css">
   <link rel="stylesheet" href="saturday://app/commercials.css">
+  <link rel="stylesheet" href="saturday://app/scene-mode.css">
+  <link rel="stylesheet" href="saturday://app/intermission.css">
 </head>
-<body data-input="video">
+<body data-input="video" class="starting">
+  <div id="sceneViewport" hidden>
+    <div id="sceneWorld">
+      <canvas id="sceneImage" aria-hidden="true"></canvas>
+      <div id="sceneTVMount"></div>
+    </div>
+    <div id="sceneHud"><button id="sceneHudSettings" type="button" aria-label="Open room scene settings"><span id="sceneHudName"></span><small>SCENE SETTINGS</small></button></div>
+    <div id="sceneHint">Drag the cabinet edge or room to move · Scroll to zoom · Esc to leave</div>
+  </div>
   <main class="room">
 
     <section id="tvSet" class="tv-set" aria-label="Saturday Tube television">
@@ -22,27 +32,24 @@
           <div class="screen-bezel">
             <div id="stage" class="stage empty">
               <video id="video" playsinline preload="metadata" crossorigin="anonymous"></video>
+              <div id="youtubePlayerHost" hidden aria-label="YouTube embedded player"></div>
               <video id="staticPicture" class="static-picture" playsinline loop preload="metadata" aria-hidden="true"></video>
               <canvas id="picture" aria-label="CRT picture: A little Saturday magic."></canvas>
+              <canvas id="genesisPicture" aria-hidden="true" hidden></canvas>
+              <div id="breakFade" class="break-fade" aria-hidden="true"></div>
               <div class="glass"></div>
               <div class="crt-glass" aria-hidden="true"></div>
               <div id="caption" class="caption"></div>
               <div id="channelSurfOverlay" class="channel-surf-overlay" hidden aria-live="polite" aria-atomic="true"></div>
-              <div id="searchingIndicator" class="searching-indicator" hidden aria-live="polite"><span class="searching-dot"></span> SEARCHING...</div>
-              <div id="emptyState" class="empty-state"><div class="tv-icon">▶</div><div class="empty-title">A little Saturday magic</div><div class="empty-copy">Open the tape shelf from the VHS loader at right</div></div>
+              <div id="volumeOverlay" class="volume-overlay" hidden aria-live="polite" aria-atomic="true"><span class="volume-label">Volume</span><span class="volume-track"><span class="volume-chevron" aria-hidden="true">&lt;</span><span class="volume-bar"></span><span class="volume-chevron" aria-hidden="true">&gt;</span></span><span class="volume-value"></span></div>
+              <div id="muteOverlay" class="mute-overlay" hidden aria-live="polite">MUTE</div>
+              <div id="searchingIndicator" class="searching-indicator" hidden aria-live="polite">TUNING...</div>
+              <div id="emptyState" class="empty-state"><div class="tv-icon">▶</div><div class="empty-title">A little Saturday magic</div><div class="empty-copy"></div></div>
             </div>
-          </div>
-          <div class="transport under-screen" aria-label="Playback controls">
-            <button id="previousButton" class="transport-key skip-key" type="button" aria-label="Rewind / previous tape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4v16L1 12zM23 4v16L13 12z"/></svg></button>
-            <button id="playButton" class="transport-key play-key" type="button" aria-label="Play or pause">▶ PLAY</button>
-            <button id="nextButton" class="transport-key skip-key" type="button" aria-label="Fast-forward / next tape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 4v16l10-8zM13 4v16l10-8z"/></svg></button>
-            <span id="timeCurrent" class="time">0:00</span>
-            <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Playback position">
-            <span id="timeDuration" class="time">0:00</span>
           </div>
         </section>
 
-        <aside class="control-panel" aria-label="Television controls and playlists">
+        <section class="control-panel cabinet-console" aria-label="Integrated VHS deck and television controls">
           <div class="panel-label compact-panel-heading"><span>PICTURE CONTROLS</span><span>ST-90</span></div>
           <div class="dial-bank primary-dials">
             <section class="channel-surf-control" aria-label="Channel">
@@ -51,13 +58,23 @@
                 <button id="channelDownButton" type="button" aria-label="Decrease channel" title="Decrease channel" disabled><span class="rocker-label">CH−</span></button>
                 <button id="channelUpButton" type="button" aria-label="Increase channel" title="Increase channel" disabled><span class="rocker-label">CH+</span></button>
               </div>
+              <div class="channel-management">
               <div class="channel-tools">
-                <button id="addChannelButton" type="button" title="Choose a channel folder" aria-label="Add a channel folder">＋</button>
-                <button id="rescanChannelButton" type="button" title="Rescan the active channel folder" aria-label="Rescan active channel folder" disabled>↻</button>
+                <button id="chooseChannelSourceButton" type="button" title="Choose the folder that holds all your channel folders" aria-label="Set channel source folder">SET CHANNEL SOURCE…</button>
+                <button id="addChannelButton" type="button" title="Choose a single channel folder" aria-label="Add a channel folder">＋ ADD ONE CHANNEL</button>
+                <button id="rescanChannelButton" type="button" title="Rebuild every channel's saved playlists from its folder and look for new channels" aria-label="Refresh channel playlists" disabled>↻ REFRESH</button>
               </div>
+              <div id="channelSourcePath" class="channel-root-path">No channel source set · every folder inside it becomes a channel.</div>
               <div id="channelStatus" class="channel-status-line" aria-live="polite">NO CHANNELS SET UP</div>
-              <div id="channelRootPath" class="channel-root-path">Choose a folder with one subfolder per show and an optional Commercials subfolder.</div>
+              <div id="channelRootPath" class="channel-root-path">Each channel folder holds show subfolders or loose videos; a Commercials folder is optional.</div>
               <div id="channelSummary" class="channel-summary">Folders stay where they are; Saturday Tube reads episodes and channel-only commercials in place.</div>
+              <section class="youtube-starter-setup" aria-labelledby="youtubeStarterHeading">
+                <h3 id="youtubeStarterHeading">STREAMING STARTERS</h3>
+                <p class="youtube-starter-note">Add public YouTube video or playlist links. Optional commercial playlists run after each programme playlist. YouTube controls ads, sign-in prompts, availability and player branding; this app does not block ads or import browser cookies.</p>
+                <div id="youtubeStarterRows" class="youtube-starter-rows"></div>
+                <p class="youtube-starter-note youtube-kids-note">If Saturday Tube is directed to children, complete YouTube’s child-directed app designation before embedding content.</p>
+              </section>
+              </div>
             </section>
             <section class="volume-rocker-control" aria-label="Volume">
               <div class="volume-rocker-heading"><span>VOLUME</span><output id="volumeArrowReadout">82%</output></div>
@@ -67,19 +84,29 @@
               </div>
             </section>
             <div class="dial-control"><span class="dial-name">VOLUME</span><span class="dial-output" id="volumeReadout">82%</span><button id="volume" class="dial" type="button" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="82" aria-valuetext="82 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
-            <div class="dial-control"><span class="dial-name">SCANLINES</span><span class="dial-output" id="scanlinesReadout">3%</span><button id="scanlines" class="dial" type="button" role="slider" aria-label="Scanline strength" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+            <div class="dial-control"><span class="dial-name">SCANLINES</span><span class="dial-output" id="scanlinesReadout">3%</span><button id="scanlines" class="dial" type="button" role="slider" aria-label="Scanline strength" aria-valuemin="0" aria-valuemax="200" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
             <div class="dial-control"><span class="dial-name">CURVATURE</span><span class="dial-output" id="curveReadout">3%</span><button id="curve" class="dial" type="button" role="slider" aria-label="Screen curvature" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+          </div>
+          <div class="transport under-screen" aria-label="Playback controls">
+            <button id="previousButton" class="transport-key skip-key" type="button" aria-label="Rewind / previous tape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 4v16L1 12zM23 4v16L13 12z"/></svg></button>
+            <button id="playButton" class="transport-key play-key" type="button" aria-label="Play or pause">▶ PLAY</button>
+            <button id="nextButton" class="transport-key skip-key" type="button" aria-label="Fast-forward / next tape"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 4v16l10-8zM13 4v16l10-8z"/></svg></button>
+            <div class="tape-timeline">
+              <span id="timeCurrent" class="time">0:00</span>
+              <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Playback position">
+              <span id="timeDuration" class="time">0:00</span>
+            </div>
           </div>
           <section class="picture-control-group" aria-label="Picture lab">
             <div class="control-group-heading"><span>PICTURE LAB</span><span>7 DIALS</span></div>
             <div class="dial-bank advanced-dials">
-              <div class="dial-control"><span class="dial-name">EDGE BLUR</span><span class="dial-output" id="edgeBlurReadout">0%</span><button id="edgeBlur" class="dial" type="button" role="slider" aria-label="Edge blur" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">EDGE BLUR</span><span class="dial-output" id="edgeBlurReadout">0%</span><button id="edgeBlur" class="dial" type="button" role="slider" aria-label="Edge blur" aria-valuemin="0" aria-valuemax="200" aria-valuenow="0" aria-valuetext="0 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
               <div class="dial-control"><span class="dial-name">HUE</span><span class="dial-output" id="hueReadout">50%</span><button id="hue" class="dial" type="button" role="slider" aria-label="Hue shift" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-valuetext="Neutral hue"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
               <div class="dial-control"><span class="dial-name">VHS SPEED</span><span class="dial-output" id="vhsScanReadout">2%</span><button id="vhsScan" class="dial" type="button" role="slider" aria-label="VHS artifact velocity" aria-valuemin="0" aria-valuemax="100" aria-valuenow="2" aria-valuetext="2 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
               <div class="dial-control"><span class="dial-name">GLITCH</span><span class="dial-output" id="glitchReadout">1%</span><button id="glitch" class="dial" type="button" role="slider" aria-label="Glitch" aria-valuemin="0" aria-valuemax="100" aria-valuenow="1" aria-valuetext="1 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
               <div class="dial-control"><span class="dial-name">BROKEN TAPE</span><span class="dial-output" id="brokenTapeReadout">1%</span><button id="brokenTape" class="dial" type="button" role="slider" aria-label="Broken tape" aria-valuemin="0" aria-valuemax="100" aria-valuenow="1" aria-valuetext="1 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
-              <div class="dial-control"><span class="dial-name">GLOW</span><span class="dial-output" id="glowReadout">2%</span><button id="glow" class="dial" type="button" role="slider" aria-label="Picture glow" aria-valuemin="0" aria-valuemax="100" aria-valuenow="2" aria-valuetext="2 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
-              <div class="dial-control"><span class="dial-name">GLARE</span><span class="dial-output" id="glareReadout">0%</span><button id="glare" class="dial" type="button" role="slider" aria-label="Screen glare" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="0 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">GLOW</span><span class="dial-output" id="glowReadout">2%</span><button id="glow" class="dial" type="button" role="slider" aria-label="Picture glow" aria-valuemin="0" aria-valuemax="200" aria-valuenow="2" aria-valuetext="2 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
+              <div class="dial-control"><span class="dial-name">BRIGHTNESS</span><span class="dial-output" id="brightnessReadout">50%</span><button id="brightness" class="dial" type="button" role="slider" aria-label="Backlight brightness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" aria-valuetext="50 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
             </div>
           </section>
           <section class="audio-control-group" aria-label="Tape deck audio effects">
@@ -87,6 +114,7 @@
             <div class="audio-effect-controls">
               <div class="dial-control fx-amount-control"><span class="dial-name">FX MIX</span><span class="dial-output" id="fxAmountReadout">3%</span><button id="fxAmount" class="dial" type="button" role="slider" aria-label="Audio effect mix" aria-valuemin="0" aria-valuemax="100" aria-valuenow="3" aria-valuetext="3 percent"><span class="dial-rim"><span class="dial-face"><i class="dial-pointer"></i><i class="dial-hub"></i></span></span></button></div>
               <div class="bypass-row audio-bypass-row"><span>FX BYPASS</span><button id="audioBypassToggle" class="power-switch" type="button" aria-label="Bypass audio effects; movie audio stays enabled" aria-pressed="false"><i></i></button></div>
+              <div class="bypass-row audio-bypass-row tv-leveler-row"><span>TV LEVELER</span><button id="tvLevelerToggle" class="power-switch on" type="button" aria-label="Level TV volume so every channel, show, movie and commercial plays at about the same loudness" title="Keeps every channel, show, movie and commercial at about the same volume on TV input" aria-pressed="true"><i></i></button></div>
             </div>
             <div class="sound-fx-controls">
               <label class="sound-fx-volume"><span>SOUND FX</span><input id="soundEffectsVolume" type="range" min="0" max="400" value="100" aria-label="Sound effects volume"><output id="soundEffectsReadout" for="soundEffectsVolume">100%</output></label>
@@ -96,17 +124,20 @@
           <section class="finish-panel" aria-label="Cabinet finish">
             <div class="finish-heading"><span>CASE MATERIAL</span><span>MODEL ST-90</span></div>
             <div class="finish-options" role="group" aria-label="Choose cabinet material">
-              <button type="button" data-finish="wood" aria-pressed="true">WOOD</button>
-              <button type="button" data-finish="grey" aria-pressed="false">GREY</button>
+              <button type="button" data-finish="wood" aria-pressed="false">WOOD</button>
+              <button type="button" data-finish="grey" aria-pressed="true">GREY</button>
               <button type="button" data-finish="black" aria-pressed="false">BLACK</button>
               <button type="button" data-finish="clear" aria-pressed="false">CLEAR</button>
             </div>
             <label class="finish-tint-control"><span>FULL-SPECTRUM TINT · WOOD / CLEAR</span><input id="cabinetTint" type="color" value="#9b6334" aria-label="Cabinet color tint"></label>
+            <label class="signal-control cabinet-skin-control"><span>TEXTURE SKIN</span><select id="cabinetSkin" aria-label="Cabinet texture skin"><option value="molded">MOLDED PLASTIC</option><option value="smooth">SMOOTH PLASTIC</option><option value="woodgrain">WOODGRAIN</option><option value="field">FIELD / OLIVE</option></select></label>
           </section>
           <section class="signal-settings" aria-label="Picture display settings">
             <label class="signal-control"><span>PICTURE MODE</span><select id="pictureMode" aria-label="Picture color mode"><option value="color">COLOR</option><option value="lowstim">LOWSTIM</option><option value="bw">B&amp;W</option></select></label>
             <label class="signal-control"><span>DISPLAY TYPE</span><select id="displayMode" aria-label="Video display effect"><option value="crt">CRT</option><option value="rear">REAR PROJECTION</option></select></label>
-            <div class="signal-control input-source-control"><span>INPUT</span><button id="inputButton" type="button" aria-label="Cycle input: video, static, TV" aria-pressed="false">VIDEO</button></div>
+            <div class="signal-control input-source-control"><span>INPUT</span><button id="inputButton" type="button" aria-label="Cycle input: video, static, TV, AUX" aria-pressed="false">VIDEO</button></div>
+            <button id="auxLoadButton" class="aux-load-game-button" type="button">LOAD GENESIS GAME…</button>
+            <input id="auxRomFile" type="file" accept=".md,.bin,.gen,.smd,.68k,.sgd,.rom,.zip" hidden>
             <div class="bypass-row picture-bypass-row"><span>PICTURE FILTER BYPASS</span><button id="pictureBypassToggle" class="power-switch" type="button" aria-label="Bypass picture effects" aria-pressed="false"><i></i></button></div>
           </section>
           <section class="view-section" aria-label="Fullscreen view">
@@ -114,6 +145,8 @@
             <div class="view-modes" role="group" aria-label="Fullscreen modes">
               <button id="screenOnlyButton" class="view-button" type="button" aria-pressed="false"><span>▣</span><small>SCREEN ONLY</small></button>
               <button id="tvFullscreenButton" class="view-button" type="button" aria-pressed="false"><span>▣</span><small>WHOLE TV</small></button>
+              <button id="dimRoomButton" class="view-button" type="button" aria-pressed="false"><span>◘</span><small>DIM ROOM</small></button>
+              <button id="sceneModeButton" class="view-button" type="button" aria-pressed="false"><span>▣</span><small>SCENES</small></button>
             </div>
           </section>
           <section class="playlist-panel" aria-label="Saved playlists">
@@ -125,7 +158,6 @@
           </section>
           <section class="deck-module" aria-label="Integrated VHS player controls">
             <header class="deck-module-heading"><span>VIDEO CASSETTE DECK</span><span class="deck-display"><i class="deck-led"></i><span id="deckState">TAPE READY</span></span></header>
-            <span class="deck-brand" aria-label="Symphonic-inspired deck styling">Symphonic</span>
             <div class="deck-insert-row">
               <button id="openButton" class="cassette-port" type="button" title="Open your local tape shelf" aria-label="Open tape library">
                 <span class="vhs-slot-door"><span class="vhs-slot-spec" aria-hidden="true">19 MICRON · 4 HEAD · VHS HQ</span><i class="vhs-slot-window"></i><i class="vhs-slot-lip"></i><i class="vhs-slot-eject"></i></span>
@@ -144,11 +176,10 @@
             </div>
           </section>
           <div class="simple-tv-controls" aria-label="TV controls">
-            <button id="tvGuideButton" type="button" class="tv-guide-button" aria-label="Open TV Guide" title="TV Guide"><span class="tv-guide-logo" aria-hidden="true"><b>TV</b><b>GUIDE</b></span></button>
             <button id="audioRcaButton" type="button" class="audio-rca-button" aria-label="Open audio settings" title="Audio settings"><span class="rca-jacks" aria-hidden="true"><i class="rca-socket rca-video"></i><i class="rca-socket rca-left-audio"></i><i class="rca-socket rca-right-audio"></i></span><small>AUDIO</small></button>
             <button id="tvSettingsButton" type="button" class="tv-settings-button" aria-label="Open TV settings" title="TV Settings"><span class="settings-gear" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M19.14 12.94a7.93 7.93 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.28 7.28 0 0 0-1.63-.95l-.36-2.54A.5.5 0 0 0 13.89 2h-3.78a.5.5 0 0 0-.49.42L9.26 4.96c-.58.23-1.13.55-1.63.95l-2.39-.96a.5.5 0 0 0-.61.22L2.71 8.49a.5.5 0 0 0 .12.64l2.03 1.58a7.93 7.93 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.5.4 1.05.72 1.63.95l.36 2.54c.03.24.24.42.49.42h3.78c.25 0 .46-.18.49-.42l.36-2.54c.58-.23 1.13-.55 1.63-.95l2.39.96c.22.09.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg></span><small>SETTINGS</small></button>
           </div>
-        </aside>
+        </section>
       </div>
 
     </section>
@@ -158,26 +189,73 @@
   <dialog id="tvGuideDialog" class="screen-osd guide-osd" aria-labelledby="tvGuideTitle">
     <header class="osd-titlebar guide-titlebar"><div class="guide-masthead"><span class="guide-title-logo" aria-hidden="true"><b>TV</b><b>GUIDE</b></span><div><strong id="tvGuideTitle">SATURDAY TUBE · TV GUIDE</strong><small id="tvGuidePage">PAGE 0 / 0</small></div></div><button id="tvGuideClose" class="osd-close" type="button" aria-label="Close TV Guide">×</button></header>
     <div id="tvGuidePageContent" class="tv-guide-page" aria-live="polite"></div>
-    <footer class="osd-actions guide-actions"><button id="tvGuidePrevious" type="button">◀ PREVIOUS</button><button id="tvGuideAdd" type="button">＋ ADD CHANNEL</button><button id="tvGuideNext" type="button">NEXT ▶</button></footer>
+    <output id="tvGuideShuffleStatus" class="guide-shuffle-status" aria-live="polite"></output>
+    <footer class="osd-actions guide-actions"><button id="tvGuidePrevious" type="button">◀ PREVIOUS</button><button id="tvGuideAdd" type="button">＋ ADD CHANNEL</button><button id="tvGuideShuffle" type="button" title="Reshuffle every channel's programmes and commercials">SHUFFLE ALL</button><button id="tvGuideNext" type="button">NEXT ▶</button></footer>
   </dialog>
   <dialog id="tvSettingsDialog" class="screen-osd tv-settings-osd" aria-labelledby="tvSettingsTitle">
-    <header class="osd-titlebar"><div><strong id="tvSettingsTitle">TV SETTINGS</strong><small>AUDIO · VIDEO</small></div><button id="tvSettingsClose" class="osd-close" type="button" aria-label="Close TV Settings">×</button></header>
-    <nav class="settings-box-tabs" aria-label="TV settings pages"><button type="button" data-settings-tab="audio">AUDIO</button><button type="button" data-settings-tab="video" aria-current="page">VIDEO</button></nav>
+    <header class="osd-titlebar"><div><strong id="tvSettingsTitle">TV SETTINGS</strong><small>AUDIO · VIDEO · CABINET · REMOTE</small></div><button id="tvSettingsClose" class="osd-close" type="button" aria-label="Close TV Settings">×</button></header>
+    <nav class="settings-box-tabs" aria-label="TV settings pages"><button type="button" data-settings-tab="audio">AUDIO</button><button type="button" data-settings-tab="video" aria-current="page">VIDEO</button><button type="button" data-settings-tab="cabinet">CABINET</button><button type="button" data-settings-tab="scenes">SCENES</button><button type="button" data-settings-tab="breaks">BREAKS</button><button type="button" data-settings-tab="tapes">TAPES</button><button type="button" data-settings-tab="channels">CHANNELS</button><button type="button" data-settings-tab="remote">REMOTE</button></nav>
     <div class="tv-settings-body">
-      <section id="tvSettingsVideo" class="settings-pane" aria-label="Video, cabinet, and display settings"></section>
+      <section id="tvSettingsVideo" class="settings-pane" aria-label="Video and display settings"></section>
+      <section id="tvSettingsCabinet" class="settings-pane" aria-label="Cabinet material, color, and texture" hidden></section>
       <section id="tvSettingsAudio" class="settings-pane" aria-label="Audio settings"></section>
+      <section id="tvSettingsTapes" class="settings-pane" aria-label="Playlists, captions, and tape options"></section>
+      <section id="tvSettingsChannels" class="settings-pane" aria-label="TV channel folders"></section>
+      <section id="tvSettingsBreaks" class="settings-pane" aria-label="Automatic intermissions" hidden>
+        <div class="intermission-controls">
+          <label>AUTOMATIC INTERMISSIONS<input id="intermissionEnabled" type="checkbox" aria-label="Automatic intermissions"></label>
+          <label>MINUTES BETWEEN BREAKS<input id="intermissionInterval" type="number" min="1" max="480" step="1" value="60" aria-label="Minutes between breaks"></label>
+          <label>BREAK LENGTH IN MINUTES<input id="intermissionDuration" type="number" min="1" max="120" step="1" value="15" aria-label="Intermission duration in minutes"></label>
+          <button id="intermissionStart" type="button">TAKE A BREAK NOW</button>
+          <p id="intermissionSchedule" role="status">AUTOMATIC BREAKS OFF</p>
+          <p>Off by default. When enabled, the timer runs while Saturday Tube is open, on every input, even while paused or buffering. All channels, VHS and SAT pause during breaks and resume from the same point. You can end a break early.</p>
+        </div>
+      </section>
+      <section id="tvSettingsScenes" class="settings-pane" aria-label="Virtual room scenes" hidden>
+        <div class="scene-controls">
+          <img id="scenePreview" alt="Selected virtual room">
+          <label>ROOM<select id="sceneSelect" aria-label="Virtual room"></select></label>
+          <label>ROOM LIGHT<output id="sceneLightValue" for="sceneLight">65%</output><input id="sceneLight" type="range" min="0" max="100" step="1" value="65" aria-label="Room light"></label>
+          <label>TV SIZE ON FURNITURE<output id="sceneCabinetSizeValue" for="sceneCabinetSize">36%</output><input id="sceneCabinetSize" type="range" min="20" max="65" step="1" value="36" aria-label="TV size on furniture"></label>
+          <label>TV SCREEN HEIGHT<output id="sceneScreenHeightValue" for="sceneScreenHeight">100%</output><input id="sceneScreenHeight" type="range" min="50" max="150" step="1" value="100" aria-label="TV screen height"></label>
+          <label>TV LEFT / RIGHT<output id="sceneCabinetXValue" for="sceneCabinetX">CENTER</output><input id="sceneCabinetX" type="range" min="-30" max="30" step="0.5" value="0" aria-label="TV left or right on furniture"></label>
+          <label>TV UP / DOWN<output id="sceneCabinetYValue" for="sceneCabinetY">CENTER</output><input id="sceneCabinetY" type="range" min="-20" max="20" step="0.5" value="0" aria-label="TV up or down on furniture"></label>
+          <button id="sceneCabinetReset" type="button">CENTER TV ON FURNITURE</button>
+          <p class="settings-note">Placement moves the room behind the stationary TV. Each room remembers its own placement.</p>
+          <label>ROOM / TV ZOOM<output id="sceneZoomValue" for="sceneZoom">100%</output><input id="sceneZoom" type="range" min="25" max="3200" step="0.1" value="100" aria-label="Room and TV zoom"></label>
+          <div id="sceneDeveloperAutoZoom" class="scene-auto-zoom" hidden>
+            <strong>DEVELOPER TOOL</strong>
+            <label class="scene-auto-zoom-toggle">CINEMATIC AUTO-ZOOM<input id="sceneAutoZoomEnabled" type="checkbox" aria-label="Enable cinematic auto-zoom"></label>
+            <label>MOTION MODE<select id="sceneAutoZoomMode" aria-label="Cinematic motion mode"><option value="original">ORIGINAL · ONE-WAY</option><option value="boomerang">BOOMERANG · NO BLACK</option></select></label>
+            <label>ORIGINAL MODE DIRECTION<select id="sceneAutoZoomDirection" aria-label="Original mode zoom direction"><option value="in">ZOOM IN · FIT SCREEN</option><option value="out">ZOOM OUT · BLACK REVEAL</option></select></label>
+            <label>ZOOM RATE<output id="sceneAutoZoomRateValue">0.1% / 60 HZ</output><input id="sceneAutoZoomRate" type="range" min="0.1" max="2" step="0.1" value="0.1" aria-label="Auto-zoom speed"></label>
+            <p>ORIGINAL runs one way: zoom in to the first screen-fit edge, or zoom out to reveal black. BOOMERANG keeps the TV centered, holds 10 seconds at screen size, zooms back to the room-image edge without black, waits 3 seconds, then repeats. Other framing controls lock while it runs; room and lighting choices remain available.</p>
+            <output id="sceneAutoZoomStatus" role="status">OFF</output>
+          </div>
+          <div class="scene-control-actions"><button id="sceneEnter" type="button">ENTER SCENE</button><button id="sceneReset" type="button">RESET VIEW</button></div>
+          <p>Screen height changes only the picture area; controls and VHS deck stay fixed. Video fits automatically without stretching. Each room remembers its own TV placement; size and height stay shared. All settings survive restarts. Drag to move the whole room; scroll to zoom. Esc leaves.</p>
+          <p id="sceneMessage" role="status"></p>
+        </div>
+      </section>
+      <section id="tvSettingsRemote" class="settings-pane remote-pane" aria-label="Phone remote" hidden>
+        <div class="bypass-row remote-power-row"><span>PHONE REMOTE</span><button id="remoteEnableToggle" class="power-switch" type="button" aria-label="Let a phone on this Wi-Fi control the TV" title="Let a phone on this Wi-Fi control the TV" aria-pressed="false"><i></i></button></div>
+        <figure id="remoteQr" class="remote-qr" hidden><img id="remoteQrImage" alt="QR code that opens the Saturday Tube remote on your phone"><figcaption id="remoteUrl"></figcaption></figure>
+        <div class="remote-open-row"><button id="remoteOpenButton" class="remote-open" type="button" hidden title="Open the paired remote in this Mac’s browser">OPEN ON THIS MAC</button><button id="remoteMirrorButton" class="remote-open" type="button" hidden title="Watch the phone remote’s keys, lights and display in this Mac’s browser">SCREEN MIRROR</button></div>
+        <p id="remoteHint" class="remote-hint">Turn the remote on to pair a phone with the QR code, or open the paired remote on this Mac.</p>
+        <button id="remoteResetButton" class="remote-reset" type="button" hidden title="Disconnects every paired phone">NEW PAIRING CODE</button>
+      </section>
     </div>
     <footer class="osd-actions"><button id="tvSettingsCloseFooter" type="button">CLOSE</button></footer>
   </dialog>
   <dialog id="libraryDialog" class="library-dialog" aria-labelledby="libraryTitle">
     <header class="library-titlebar">
       <div class="library-window-lights" aria-hidden="true"><i></i><i></i><i></i></div>
-      <div><strong id="libraryTitle">TAPE LIBRARY</strong><small id="libraryDestination">LOCAL MAC SHELF · ORIGINALS KEPT</small></div>
+      <div><strong id="libraryTitle">THE TAPE SHELF</strong><small id="libraryDestination">YOUR OWN LITTLE TAPE COLLECTION</small></div>
       <button id="libraryCloseButton" class="library-close" type="button" aria-label="Close tape library">×</button>
     </header>
     <div class="library-toolbar">
-      <button id="libraryFolderButton" class="library-folder-button" type="button">BROWSE SOURCE FOLDER…</button>
-      <button id="libraryAddFileButton" class="library-folder-button" type="button">IMPORT TAPES…</button>
+      <button id="libraryFolderButton" class="library-folder-button" type="button">LOOK THROUGH YOUR TAPES…</button>
+      <button id="libraryAddFileButton" class="library-folder-button" type="button">BRING MORE TAPES…</button>
       <button id="libraryUpButton" class="library-up-button" type="button" aria-label="Go up one folder" disabled>↑</button>
       <nav id="libraryBreadcrumbs" class="library-breadcrumbs" aria-label="Current folder"><span>Choose a folder to start your shelves</span></nav>
       <input id="librarySearch" type="search" placeholder="Find a tape…" aria-label="Search visible tapes" autocomplete="off">
@@ -214,7 +292,24 @@
     <div id="commercialLibrarySummary" class="commercial-library-summary">0 playable · 0 boundaries flagged for review</div>
     <div id="commercialClipList" class="commercial-clip-list" aria-label="Saved commercials"></div>
   </dialog>
+  <dialog id="intermissionDialog" aria-labelledby="intermissionTitle" aria-describedby="intermissionMessage">
+    <div class="intermission-bars" aria-hidden="true"></div>
+    <div class="intermission-card">
+      <span class="intermission-station">SATURDAY TUBE PRESENTS</span>
+      <h1 id="intermissionTitle">INTERMISSION</h1>
+      <p id="intermissionMessage">STRETCH YOUR LEGS!</p>
+      <output id="intermissionCountdown" aria-label="Break time remaining"></output>
+      <small>ALL CHANNELS AND INPUTS PAUSED · YOUR SHOW WILL WAIT</small>
+      <button id="intermissionEnd" type="button">END BREAK EARLY</button>
+    </div>
+  </dialog>
   <script src="saturday://app/movie-preroll.js"></script>
+  <script src="saturday://app/scene-mode.js"></script>
+  <script src="saturday://app/intermission.js"></script>
+  <script src="saturday://app/youtube-sources.js"></script>
+  <script src="saturday://app/youtube-player.js"></script>
+  <script src="saturday://app/vendor/genesis/genesis-core.js"></script>
+  <script src="saturday://app/aux-genesis.js"></script>
   <script src="saturday://app/renderer.js"></script>
   <script src="saturday://app/commercial-mode.js"></script>
 </body>

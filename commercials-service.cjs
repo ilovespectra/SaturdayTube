@@ -9,6 +9,10 @@ const BREAK_AD_RATIO = AD_SECONDS_PER_PROGRAM_SECOND;
 const MIN_MIDROLL_SECONDS = 15 * 60;
 const MIN_CLIP_SECONDS = 2.5;
 const MAX_CLIP_SECONDS = 180;
+// A fade to black over continuing sound is a scene change inside one spot; it is only kept as a split if the spot would
+// otherwise run longer than any real commercial.
+const MAX_REJOINED_SPOT_SECONDS = 62;
+const SPOT_GAP_PADDING_SECONDS = 0.25;
 const WATCHED_VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.avi', '.webm']);
 const WATCHED_FILE_STABILITY_MS = 90_000;
 const WATCH_SCAN_INTERVAL_MS = 15_000;
@@ -36,10 +40,40 @@ function parseBlackIntervals(text) {
   return intervals;
 }
 
+function parseSilenceIntervals(text, durationSeconds = Infinity) {
+  const silences = [];
+  let open = null;
+  for (const match of String(text || '').matchAll(/silence_(start|end):\s*(-?[\d.]+)/g)) {
+    const seconds = Math.max(0, Number(match[2]));
+    if (match[1] === 'start') open = seconds;
+    else if (open !== null) {
+      silences.push({ start: open, end: seconds });
+      open = null;
+    }
+  }
+  if (open !== null && Number.isFinite(durationSeconds)) silences.push({ start: open, end: durationSeconds });
+  return silences;
+}
+
+// Marks each black interval as quiet or loud; without an audio stream the marks are left off and every black can split.
+function markQuietBlacks(blacks, silences) {
+  if (!Array.isArray(silences)) return blacks;
+  return blacks.map(black => ({
+    ...black,
+    quiet: silences.some(silence => silence.start <= black.end + SPOT_GAP_PADDING_SECONDS && silence.end >= black.start - SPOT_GAP_PADDING_SECONDS)
+  }));
+}
+
+function mergedQuiet(left, right) {
+  if (left === true || right === true) return true;
+  if (left === false || right === false) return false;
+  return undefined;
+}
+
 function mergeBlackIntervals(intervals, joinGap = 0.18) {
   const sorted = (Array.isArray(intervals) ? intervals : [])
     .filter(item => Number.isFinite(item?.start) && Number.isFinite(item?.end) && item.end > item.start)
-    .map(item => ({ start: Number(item.start), end: Number(item.end) }))
+    .map(item => ({ start: Number(item.start), end: Number(item.end), quiet: typeof item.quiet === 'boolean' ? item.quiet : undefined }))
     .sort((a, b) => a.start - b.start);
   const merged = [];
   for (const item of sorted) {
@@ -48,6 +82,7 @@ function mergeBlackIntervals(intervals, joinGap = 0.18) {
       previous.end = Math.max(previous.end, item.end);
       previous.duration = previous.end - previous.start;
       previous.merged = true;
+      previous.quiet = mergedQuiet(previous.quiet, item.quiet);
     } else {
       merged.push({ ...item, duration: item.end - item.start, merged: false });
     }
@@ -121,7 +156,8 @@ function createCommercialSegments(durationSeconds, blackIntervals) {
       at: Number(((item.start + item.end) / 2).toFixed(3)),
       duration: Number(item.duration.toFixed(3)),
       confidence: confidenceForBlack(item),
-      merged: Boolean(item.merged)
+      merged: Boolean(item.merged),
+      quiet: item.quiet
     }));
 
   // Very close black flashes are a single edit; genuine short bumpers remain separate.
@@ -134,10 +170,19 @@ function createCommercialSegments(durationSeconds, blackIntervals) {
       selected[selected.length - 1] = boundary;
     }
   }
+  // Spots are separated by black and a pause in the sound together; black over speech or music stays inside the spot.
+  const between = [];
+  let clipStart = 0;
+  for (const [index, boundary] of selected.entries()) {
+    const nextStart = selected[index + 1]?.start ?? duration;
+    if (boundary.quiet === false && nextStart - clipStart <= MAX_REJOINED_SPOT_SECONDS) continue;
+    between.push(boundary);
+    clipStart = boundary.end;
+  }
   const result = [];
   let previous = { start: 0, end: 0, confidence: 1 };
   let serial = 1;
-  const splitBoundaries = [...selected, { start: duration, end: duration, at: duration, confidence: 1 }];
+  const splitBoundaries = [...between, { start: duration, end: duration, at: duration, confidence: 1 }];
   for (const [boundaryIndex, boundary] of splitBoundaries.entries()) {
     const start = previous.end;
     const end = boundary.start;
@@ -161,16 +206,32 @@ function createCommercialSegments(durationSeconds, blackIntervals) {
   return result;
 }
 
-function runCapture(executable, args, { limit = 2_000_000 } = {}) {
+// Sources split before versioning are recognised by their recorded black-frame scan.
+function sourceSplitVersion(source) {
+  if (Number(source?.splitVersion) > 0) return Number(source.splitVersion);
+  return Number.isFinite(Number(source?.blackTransitionCount)) && source?.blackTransitionCount !== undefined ? 1 : 0;
+}
+
+const PROBE_TIMEOUT_MS = 20_000;
+
+function runCapture(executable, args, { limit = 2_000_000, timeoutMs = 0, signal } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'], signal, killSignal: 'SIGKILL' });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    // Some damaged files make ffprobe spin forever; a probe that never answers must not stall a whole channel scan.
+    const timer = timeoutMs > 0 ? setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeoutMs) : null;
     const append = (current, chunk) => (current + chunk.toString()).slice(-limit);
     child.stdout.on('data', chunk => { stdout = append(stdout, chunk); });
     child.stderr.on('data', chunk => { stderr = append(stderr, chunk); });
-    child.once('error', reject);
-    child.once('close', code => code === 0 ? resolve({ stdout, stderr }) : reject(new Error(stderr.trim().slice(-900) || `${path.basename(executable)} exited with code ${code}`)));
+    child.once('error', error => { if (timer) clearTimeout(timer); reject(error); });
+    child.once('close', code => {
+      if (timer) clearTimeout(timer);
+      if (timedOut) reject(Object.assign(new Error(`${path.basename(executable)} timed out reading the file.`), { code: 'ETIMEDOUT' }));
+      else if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error(stderr.trim().slice(-900) || `${path.basename(executable)} exited with code ${code}`));
+    });
   });
 }
 
@@ -270,12 +331,12 @@ class CommercialsService {
   async probeDuration(filePath) {
     const executable = this.ffprobePath || findExecutable('ffprobe');
     if (executable) {
-      const { stdout } = await runCapture(executable, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath]);
+      const { stdout } = await runCapture(executable, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], { timeoutMs: PROBE_TIMEOUT_MS });
       const duration = Number(stdout.trim().split(/\s+/)[0]);
       if (Number.isFinite(duration) && duration > 0) return duration;
     }
     const ffmpeg = (await this.getFFmpegCapabilities()).executable;
-    const { stderr } = await runCapture(ffmpeg, ['-hide_banner', '-loglevel', 'info', '-i', filePath, '-frames:v', '1', '-f', 'null', '-']);
+    const { stderr } = await runCapture(ffmpeg, ['-hide_banner', '-loglevel', 'info', '-i', filePath, '-frames:v', '1', '-f', 'null', '-'], { timeoutMs: PROBE_TIMEOUT_MS });
     const match = stderr.match(/Duration:\s*(\d+:\d{2}:\d{2}(?:\.\d+)?)/);
     const duration = match ? parseClock(match[1]) : NaN;
     if (!Number.isFinite(duration) || duration <= 0) throw new Error('FFmpeg could not read the video duration.');
@@ -288,7 +349,7 @@ class CommercialsService {
     const { stdout } = await runCapture(executable, [
       '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name',
       '-of', 'default=noprint_wrappers=1:nokey=1', filePath
-    ]);
+    ], { timeoutMs: PROBE_TIMEOUT_MS });
     return String(stdout).trim().toLowerCase();
   }
 
@@ -298,8 +359,33 @@ class CommercialsService {
     const { stdout } = await runCapture(executable, [
       '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name',
       '-of', 'default=noprint_wrappers=1:nokey=1', filePath
-    ]);
+    ], { timeoutMs: PROBE_TIMEOUT_MS });
     return String(stdout).trim().toLowerCase();
+  }
+
+  // One quick look at what a file holds: first video and audio codecs and the container's start time.
+  async probeStreams(filePath, { signal } = {}) {
+    const executable = this.ffprobePath || findExecutable('ffprobe');
+    if (!executable) return null;
+    const { stdout } = await runCapture(executable, [
+      '-v', 'error', '-show_entries', 'stream=codec_type,codec_name:format=start_time', '-of', 'json', filePath
+    ], { timeoutMs: PROBE_TIMEOUT_MS, signal });
+    const parsed = JSON.parse(stdout || '{}');
+    const streams = Array.isArray(parsed.streams) ? parsed.streams : [];
+    const first = type => String(streams.find(stream => stream.codec_type === type)?.codec_name || '').toLowerCase();
+    return { video: first('video'), audio: first('audio') || 'none', startTime: Number(parsed.format?.start_time) || 0 };
+  }
+
+  // Time of the last keyframe at or before `seconds` (container time), or null when none can be read quickly.
+  async probeKeyframeBefore(filePath, seconds, { signal } = {}) {
+    const executable = this.ffprobePath || findExecutable('ffprobe');
+    if (!executable) return null;
+    const { stdout } = await runCapture(executable, [
+      '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey', '-read_intervals', `${Math.max(0, seconds)}%+#1`,
+      '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'csv=p=0', filePath
+    ], { timeoutMs: 8000, signal });
+    const time = Number(String(stdout).trim().split(/[\s,]+/)[0]);
+    return Number.isFinite(time) ? time : null;
   }
 
   async detectBlackIntervals(filePath, onProgress = () => {}) {
@@ -308,9 +394,11 @@ class CommercialsService {
     const { stderr } = await runCapture(executable, [
       '-hide_banner', '-nostats', '-loglevel', 'info', '-i', filePath,
       '-vf', 'scale=320:-2,blackdetect=d=0.09:pix_th=0.06:pic_th=0.98',
-      '-an', '-f', 'null', '-'
+      '-af', 'silencedetect=n=-40dB:d=0.06',
+      '-f', 'null', '-'
     ], { limit: 8_000_000 });
-    return parseBlackIntervals(stderr);
+    const hasAudio = /Stream #\d+:\d+[^\n]*: Audio:/.test(stderr);
+    return markQuietBlacks(parseBlackIntervals(stderr), hasAudio ? parseSilenceIntervals(stderr) : null);
   }
 
   async encodeClip(sourcePath, start, end, outputPath) {
@@ -527,7 +615,7 @@ class CommercialsService {
     return { imported: true, sourceId, clipId, title };
   }
 
-  async importCompilation(sourcePath, onProgress = () => {}) {
+  async importCompilation(sourcePath, onProgress = () => {}, { resplit = false, splitVersion = 1 } = {}) {
     await this.ready();
     const source = await fs.promises.realpath(sourcePath);
     const sourceStat = await fs.promises.stat(source);
@@ -537,7 +625,8 @@ class CommercialsService {
     }
     const sourceHash = await this.hashFile(source);
     const existing = this.database.sources.find(item => item.sha256 === sourceHash && item.status === 'complete');
-    if (existing) return { sourceId: existing.id, clipCount: this.database.clips.filter(clip => clip.sourceId === existing.id).length, duplicate: true };
+    // A re-split upgrades a reel that was once stored whole; finished splits are still reused as duplicates.
+    if (existing && (!resplit || sourceSplitVersion(existing) >= splitVersion)) return { sourceId: existing.id, clipCount: this.database.clips.filter(clip => clip.sourceId === existing.id).length, duplicate: true };
     const initialStat = sourceStat;
     const { executable } = await this.getFFmpegCapabilities();
     await runCapture(executable, ['-nostdin', '-v', 'error', '-xerror', '-i', source, '-map', '0:v:0', '-map', '0:a?', '-f', 'null', '-'], { limit: 6000 });
@@ -614,6 +703,18 @@ class CommercialsService {
       completed.push(clip);
       onProgress({ phase: 'clip-complete', current: index + 1, total: segments.length, title: clip.title, needsReview: clip.needsReview });
     }
+    const kept = new Set(completed.map(clip => clip.id));
+    const stale = priorClips.filter(clip => !kept.has(clip.id));
+    if (stale.length) {
+      this.database.clips = this.database.clips.filter(clip => !stale.includes(clip));
+      for (const clip of stale) {
+        // Whole-file imports point at the stored source itself; only generated clip files are removed.
+        if (typeof clip.file === 'string' && clip.file.startsWith('clips/') && clip.file !== sourceRelativePath) {
+          await fs.promises.unlink(containedPath(this.root, clip.file)).catch(() => {});
+        }
+      }
+    }
+    sourceRecord.splitVersion = Math.max(sourceSplitVersion(sourceRecord), Number(splitVersion) || 1);
     sourceRecord.status = 'complete';
     sourceRecord.clipCount = completed.length;
     sourceRecord.reviewCount = completed.filter(clip => clip.needsReview && !clip.reviewed).length;
@@ -622,11 +723,31 @@ class CommercialsService {
     return { sourceId, clipCount: completed.length, reviewCount: sourceRecord.reviewCount, duplicate: false };
   }
 
+  // A source whose folder was renamed or moved is recognised by its size, name and content, so its clips are not split again.
+  async relinkMovedSource(sourcePath, stat) {
+    await this.ready();
+    const name = path.basename(sourcePath);
+    const candidates = this.database.sources.filter(source => source.status === 'complete' && typeof source.originalPath === 'string'
+      && source.originalPath !== sourcePath && Number(source.sizeBytes) === Number(stat?.size) && path.basename(source.originalPath) === name
+      && !fs.existsSync(source.originalPath));
+    if (!candidates.length) return false;
+    const sha256 = await this.hashFile(sourcePath).catch(() => '');
+    const source = sha256 && candidates.find(item => item.sha256 === sha256);
+    if (!source) return false;
+    source.originalPath = sourcePath;
+    source.mtimeMs = stat.mtimeMs;
+    await this.save();
+    return true;
+  }
+
   async listChannelSources() {
     await this.ready();
     return this.database.sources
       .filter(source => source.status === 'complete' && typeof source.originalPath === 'string')
-      .map(({ id, status, originalPath, sizeBytes, mtimeMs }) => ({ id, status, originalPath, sizeBytes, mtimeMs }));
+      .map(source => ({
+        id: source.id, status: source.status, originalPath: source.originalPath, sizeBytes: source.sizeBytes, mtimeMs: source.mtimeMs,
+        clipCount: source.clipCount, splitVersion: sourceSplitVersion(source)
+      }));
   }
 
   async listLibrary() {
@@ -750,6 +871,8 @@ module.exports = {
   MAX_CLIP_SECONDS,
   CommercialsService,
   parseBlackIntervals,
+  parseSilenceIntervals,
+  markQuietBlacks,
   mergeBlackIntervals,
   chooseProgramBreaks,
   createCommercialSegments,

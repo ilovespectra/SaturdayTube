@@ -42,6 +42,15 @@ test('parses representative shelf movie and episode filenames', () => {
   assert.deepEqual([parsed[14].query, parsed[14].year], ['snow-toy story of terror', '2013']);
   assert.equal(metadataCacheKey(shelfNames[1]), metadataCacheKey('Bluey S01E02.mkv'));
   assert.notEqual(metadataCacheKey(shelfNames[1]), metadataCacheKey(shelfNames[2]));
+  assert.equal(metadataCacheKey('The.Nightmare.Before.Christmas.1993.mkv'), 'title:v2:thenightmarebeforechristmas:1993');
+});
+
+test('parses PBS full-episode uploads into provider-safe series evidence', () => {
+  const carl = parseMetadataFilename('Carl the Collector FULL EPISODE ｜ Whole Lotta Lotta ⧸ Leaf It To Carl 🎧📚 ｜ PBS KIDS [0DbYdEhH74Q].mp4');
+  const franklin = parseMetadataFilename("Franklin the Turtle - Franklin Has A Sleep Over ⧸ Franklin's Halloween - FULL EPISODE [ds9zZm1mg24].mp4");
+  assert.deepEqual([carl.query, carl.mode, carl.series], ['Carl the Collector', 'series', 'Carl the Collector']);
+  assert.deepEqual([franklin.query, franklin.mode, franklin.series], ['Franklin', 'series', 'Franklin']);
+  assert.equal(franklin.episodeTitle, "Franklin Has A Sleep Over ⧸ Franklin's Halloween");
 });
 
 test('TV matches require an exact series title and compatible premiere year', () => {
@@ -60,6 +69,14 @@ test('Wikipedia title matches are exact and honor the requested year', () => {
   assert.equal(findStrictWikipediaPage([{ title: 'Hocus Pocus 2' }], 'Hocus Pocus'), null);
   assert.equal(findStrictWikipediaPage([page, { title: 'Hocus Pocus (1993 movie)', description: '1993 film' }], 'Hocus Pocus', '1993'), null);
   assert.equal(normalizeMetadataTitle('The Simpsons'), normalizeMetadataTitle('the-simpsons'));
+});
+
+test('a film page wins over a soundtrack and disambiguation page with the same words', () => {
+  const film = { title: 'The Nightmare Before Christmas', description: '1993 film by Henry Selick' };
+  const soundtrack = { title: 'The Nightmare Before Christmas (soundtrack)', description: '1993 soundtrack album by Danny Elfman' };
+  const disambiguation = { title: 'The Nightmare Before Christmas (disambiguation)', description: 'Topics referred to by the same term', excerpt: 'The 1993 film' };
+  assert.equal(findStrictWikipediaPage([film, soundtrack, disambiguation], 'The Nightmare Before Christmas', '1993'), film);
+  assert.equal(findStrictWikipediaPage([soundtrack], 'The Nightmare Before Christmas', '1993'), null);
 });
 
 test('an exact film page wins over same-title pages mentioning its year in excerpts', () => {
@@ -117,6 +134,35 @@ test('the shelf Bluey filename selects the 2018 animated series', async () => {
     return matches;
   });
   assert.deepEqual([result?.title, result?.year], ['Bluey', '2018']);
+});
+
+test('Franklin episode titles disambiguate same-name TV shows', async () => {
+  const calls = [];
+  const parsed = parseMetadataFilename("Franklin the Turtle - Franklin Has A Sleep Over ⧸ Franklin's Halloween - FULL EPISODE [ds9zZm1mg24].mp4");
+  const matches = [
+    { score: 0.88, show: { id: 84366, name: 'Franklin', premiered: '2025-05-15', type: 'Scripted' } },
+    { score: 0.87, show: { id: 17755, name: 'Franklin', premiered: '1997-11-03', type: 'Animation' } },
+    { score: 0.86, show: { id: 74480, name: 'Franklin', premiered: '2024-04-12', type: 'Drama' } }
+  ];
+  const result = await lookupMetadata(parsed, async url => {
+    calls.push(url);
+    if (url.includes('/search/shows?')) return matches;
+    if (url.endsWith('/shows/84366/episodes')) return [{ name: 'Episode 1' }];
+    if (url.endsWith('/shows/17755/episodes')) return [{ name: 'Franklin Has a Sleepover' }, { name: "Franklin's Halloween" }];
+    if (url.endsWith('/shows/74480/episodes')) return [{ name: 'Sauce for Prayers' }];
+    throw new Error(`Unexpected request ${url}`);
+  });
+  assert.deepEqual([result?.title, result?.year, result?.source], ['Franklin', '1997', 'TVmaze']);
+  assert.equal(calls.length, 4);
+});
+
+test('Carl the Collector full-episode filename matches the exact live series title', async () => {
+  const parsed = parseMetadataFilename('Carl the Collector FULL EPISODE ｜ Whole Lotta Lotta ⧸ Leaf It To Carl 🎧📚 ｜ PBS KIDS [0DbYdEhH74Q].mp4');
+  const result = await lookupMetadata(parsed, async url => {
+    assert.match(url, /search\/shows\?q=Carl%20the%20Collector/);
+    return [{ score: 1.37, show: { id: 81050, name: 'Carl the Collector', premiered: '2024-11-14', type: 'Animation' } }];
+  });
+  assert.deepEqual([result?.title, result?.year, result?.source], ['Carl the Collector', '2024', 'TVmaze']);
 });
 
 test('episode title evidence selects the exact Spider-Man series', async () => {
