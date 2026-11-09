@@ -1,5 +1,11 @@
 # Saturday Tube 2 (Electron)
 
+A local-first macOS video player for your own videos: build channels, browse a tape shelf, and shape a 1990s CRT picture.
+
+**0.8.8 candidate:** Movies shuffle without repeating until the pool is exhausted. **SHUFFLE ALL** reshuffles upcoming programmes across channels; episodes within a series stay in order.
+
+**Availability:** This repository is private. The tested 0.8.8 package is an ad-hoc-signed local candidate, not a public download; official releases and in-app updates are not available yet.
+
 This Electron project is maintained separately from the legacy native C++/libmpv version.
 
 ## Requirements
