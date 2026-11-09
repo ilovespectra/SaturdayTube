@@ -1095,6 +1095,9 @@ body[data-finish="clear"] { background:radial-gradient(ellipse at 50% 8%,color-m
 .channel-tools button { min-width:0; min-height:22px; padding:3px 4px; color:var(--case-text,#f4e8d0); border:1px solid var(--case-border,#86633a); border-radius:3px; background:linear-gradient(#ffffff18,#0005),var(--case-inset,#24170f); font:600 6px ui-monospace,SFMono-Regular,Menlo,monospace; cursor:pointer; font-size:9px; }
 .channel-tools button:disabled { opacity:.45; cursor:default; }
 .channel-tools :focus-visible { outline:2px solid var(--case-accent,#e6c77c); outline-offset:1px; }
+.tv-settings-osd .channel-tools { grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; }
+.tv-settings-osd .channel-tools button { min-height:24px; padding:4px 7px; font-size:8px; }
+.tv-settings-osd .channel-shuffle-status { min-height:10px; color:#d1e0ff; font:7px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace; }
 .channel-root-path,.channel-summary { margin-top:3px; color:var(--case-muted,#d1b58b); font:5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace; overflow-wrap:anywhere; }
 .channel-root-path { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .channel-summary { color:var(--case-text,#f4e8d0); }

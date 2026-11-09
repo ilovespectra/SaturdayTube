@@ -60,6 +60,8 @@ const addChannelButton = document.querySelector('#addChannelButton');
 const chooseChannelSourceButton = document.querySelector('#chooseChannelSourceButton');
 const channelSourcePath = document.querySelector('#channelSourcePath');
 const rescanChannelButton = document.querySelector('#rescanChannelButton');
+const channelShuffleButton = document.querySelector('#channelShuffleButton');
+const channelShuffleStatusOutput = document.querySelector('#channelShuffleStatus');
 const channelSurfName = document.querySelector('#channelSurfName');
 const channelSurfOverlay = document.querySelector('#channelSurfOverlay');
 const volumeOverlay = document.querySelector('#volumeOverlay');
@@ -3047,10 +3049,15 @@ function renderChannels() {
 }
 function updateGuideShuffleControls() {
   const busy = Boolean(channelRefreshPromise);
-  document.querySelector('#tvGuideShuffle').disabled = busy || !channelsStartupReady || !channels.length
+  const unavailable = busy || !channelsStartupReady || !channels.length
     || channels.some(channel => channel.adFreeUpdating || channel.guideEditPromise);
-  document.querySelector('#tvGuideShuffle').textContent = busy && channelShuffleStatus.startsWith('SHUFFLING') ? 'SHUFFLING…' : 'SHUFFLE ALL';
+  const label = busy && channelShuffleStatus.startsWith('SHUFFLING') ? 'SHUFFLING…' : 'SHUFFLE ALL';
+  document.querySelector('#tvGuideShuffle').disabled = unavailable;
+  document.querySelector('#tvGuideShuffle').textContent = label;
   document.querySelector('#tvGuideShuffleStatus').textContent = channelShuffleStatus;
+  channelShuffleButton.disabled = unavailable;
+  channelShuffleButton.textContent = busy && channelShuffleStatus.startsWith('SHUFFLING') ? 'SHUFFLING…' : '⤨ SHUFFLE LINEUPS';
+  channelShuffleStatusOutput.textContent = channelShuffleStatus;
   document.querySelector('#tvGuideAdd').disabled = busy;
 }
 function tvGuideLineup() {
@@ -4571,12 +4578,166 @@ function unwrapChannelSchedule(channel) {
   channel.broadcast = null;
   channel.savedPlaybackState = null;
 }
+function channelProgramGroupEnd(queue, currentIndex) {
+  if (!Array.isArray(queue) || currentIndex < 0 || currentIndex >= queue.length) return -1;
+  const current = queue[currentIndex];
+  let program = current?.segmentType === 'program' ? current : null;
+  if (!program) {
+    for (let index = currentIndex - 1; index >= 0; index -= 1) {
+      if (queue[index]?.segmentType === 'program') { program = queue[index]; break; }
+    }
+  }
+  if (!program) {
+    const breakSequence = Number(current?.breakSequence) || 0;
+    let end = currentIndex;
+    for (let index = currentIndex + 1; index < queue.length; index += 1) {
+      const next = queue[index];
+      if (next?.segmentType !== 'commercial' || (breakSequence && Number(next.breakSequence) !== breakSequence)) break;
+      end = index;
+    }
+    return end;
+  }
+  const sequence = Number(program.programSequence) || 0;
+  const sameProgram = item => sequence
+    ? Number(item?.programSequence) === sequence
+    : item?.path === program.path && item?.showPath === program.showPath;
+  let end = currentIndex;
+  for (let index = currentIndex + 1; index < queue.length; index += 1) {
+    const next = queue[index];
+    if (next?.segmentType === 'program' && !sameProgram(next)) break;
+    if (sequence && Number(next?.programSequence) && Number(next.programSequence) !== sequence) break;
+    end = index;
+  }
+  return end;
+}
+function channelEpisodeIsNumbered(item) {
+  const source = String(item?.path || item?.title || '');
+  const parts = source.split(/[\\/]/);
+  const fileName = (parts.pop() || '').replace(/\.[^.]*$/, '');
+  const inSeasonFolder = parts.some(part => /(?:^|[^a-z0-9])season[ ._-]*0*\d{1,3}(?:$|[^a-z0-9])/i.test(part));
+  const namedEpisode = /(?:^|[^a-z0-9])s\s*0*\d{1,3}[\s._-]*e\s*0*\d{1,4}(?:$|[^a-z0-9])/i.test(fileName)
+    || /(?:^|[^a-z0-9])0*\d{1,3}\s*x\s*0*\d{1,4}(?:$|[^a-z0-9])/i.test(fileName)
+    || /(?:^|[^a-z0-9])(?:episode|ep|part)[ ._-]*0*\d{1,4}(?:$|[^a-z0-9])/i.test(fileName)
+    || /^\s*0*\d{1,4}[ ._-]+/.test(fileName);
+  return inSeasonFolder || namedEpisode;
+}
+function shuffleChannelItems(items, random = Math.random) {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const sample = Number(random());
+    const other = Math.max(0, Math.min(index, Math.floor((Number.isFinite(sample) ? sample : 0) * (index + 1))));
+    [result[index], result[other]] = [result[other], result[index]];
+  }
+  return result;
+}
+function shuffleChannelPoolCycles(groups, random = Math.random) {
+  const result = [];
+  let pool = [];
+  let seen = new Set();
+  for (const group of groups) {
+    const episodePath = group.episodePath || '';
+    if (episodePath && seen.has(episodePath)) {
+      result.push(...shuffleChannelItems(pool, random));
+      pool = [];
+      seen = new Set();
+    }
+    pool.push(group);
+    if (episodePath) seen.add(episodePath);
+  }
+  result.push(...shuffleChannelItems(pool, random));
+  return result;
+}
+function shuffleChannelScheduleTail(queue, preserveThroughIndex, shows = [], random = Math.random) {
+  const original = Array.isArray(queue) ? queue : [];
+  const prefix = original.slice(0, preserveThroughIndex + 1);
+  const tail = original.slice(preserveThroughIndex + 1);
+  const groups = [];
+  let currentGroup = null;
+  for (const item of tail) {
+    if (item?.segmentType === 'program') {
+      const sequence = Number(item.programSequence) || 0;
+      const sameGroup = currentGroup && (sequence
+        ? currentGroup.programSequence === sequence
+        : currentGroup.episodePath === item.path && currentGroup.showPath === item.showPath);
+      if (!sameGroup) {
+        currentGroup = { showPath: item.showPath || '', programSequence: sequence, episodePath: item.path || '', items: [] };
+        groups.push(currentGroup);
+      }
+      currentGroup.items.push(item);
+    } else if (item?.segmentType === 'commercial') {
+      if (!currentGroup) {
+        currentGroup = { showPath: '', programSequence: Number(item.programSequence) || 0, episodePath: '', items: [] };
+        groups.push(currentGroup);
+      }
+      currentGroup.items.push(item);
+    }
+  }
+  const showByPath = new Map((shows || []).map(show => [show.path, show]));
+  const byShow = new Map();
+  groups.forEach((group, index) => {
+    const key = group.showPath || `__other-${index}`;
+    const list = byShow.get(key) || [];
+    list.push(group);
+    byShow.set(key, list);
+  });
+  for (const [showPath, pending] of byShow) {
+    const show = showByPath.get(showPath);
+    const looseUnnumbered = show?.loose === true && show.episodes?.length > 1
+      && !show.episodes.every(channelEpisodeIsNumbered);
+    if (looseUnnumbered) byShow.set(showPath, shuffleChannelPoolCycles(pending, random));
+  }
+  const lastAired = prefix.slice().reverse().find(item => item?.segmentType === 'program');
+  let lastShowPath = lastAired?.showPath || '';
+  const orderedGroups = [];
+  while (true) {
+    const round = shuffleChannelItems([...byShow.keys()].filter(showPath => byShow.get(showPath)?.length), random);
+    if (!round.length) break;
+    if (round.length > 1 && round[0] === lastShowPath) round.push(round.shift());
+    for (const showPath of round) {
+      const group = byShow.get(showPath).shift();
+      orderedGroups.push(group);
+      lastShowPath = group.showPath || showPath;
+    }
+  }
+  let nextSequence = Math.max(0, ...prefix.map(item => Number(item.sequence) || 0)) + 1;
+  let nextProgrammeSequence = Math.max(0, ...prefix.map(item => Number(item.programSequence) || 0));
+  const reorderedTail = [];
+  let lastCommercial = null;
+  for (const group of orderedGroups) {
+    const programmeSequence = ++nextProgrammeSequence;
+    let breakSequence = null;
+    let adBreakPosition = 0;
+    for (const item of group.items) {
+      const reordered = { ...item, sequence: nextSequence++ };
+      if (item.segmentType === 'program') {
+        reordered.programSequence = programmeSequence;
+        reordered.breakSequence = 0;
+        reordered.adBreakPosition = 0;
+        breakSequence = null;
+        adBreakPosition = 0;
+      } else {
+        reordered.programSequence = programmeSequence;
+        if (breakSequence === null) breakSequence = reordered.sequence;
+        reordered.breakSequence = breakSequence;
+        reordered.adBreakPosition = ++adBreakPosition;
+        lastCommercial = reordered;
+      }
+      reorderedTail.push(reordered);
+    }
+  }
+  return {
+    queue: [...prefix, ...reorderedTail],
+    nextSequence,
+    nextProgrammeSequence,
+    lastShowPath: orderedGroups.at(-1)?.showPath || lastAired?.showPath || '',
+    lastCommercialPath: lastCommercial?.path || ''
+  };
+}
 async function shuffleAllChannels() {
   if (!channelsStartupReady || !channels.length || channelRefreshPromise
     || channels.some(channel => channel.adFreeUpdating || channel.guideEditPromise)) return;
   const ordered = [activeChannel(), ...channels.filter(channel => channel.id !== activeChannelId)].filter(Boolean);
   channelRefreshPromise = (async () => {
-    // Let the shared refresh lock be assigned before rendering or starting any queue work.
     await Promise.resolve();
     let completed = 0;
     const failed = [];
@@ -4591,28 +4752,52 @@ async function shuffleAllChannels() {
         if (channel.error) throw new Error(channel.error);
         if (channel.guideSchedulePromise) await channel.guideSchedulePromise;
         if (channel.broadcastInitPromise) await channel.broadcastInitPromise;
+        if (!channel.broadcast) await initializeChannelBroadcast(channel);
         if (channel.broadcast?.queuePromise) await channel.broadcast.queuePromise;
-        if (selectedInput === 'tv' && activeChannelId === channel.id) {
-          channelTuneToken += 1;
-          clearChannelVideoForInputChange();
-          setTVSearching(true);
+
+        const capturedAt = Date.now();
+        const capturePlayback = channel.id === activeChannelId && isCurrentChannelPlayback();
+        const snapshot = channelPlaybackSnapshot(channel, capturedAt, capturePlayback);
+        let elapsed = Number(snapshot?.elapsedSeconds);
+        if (!Number.isFinite(elapsed)) elapsed = broadcastElapsed(channel, capturedAt);
+        let position = locateChannelSegment(channel, elapsed);
+        if (!position) {
+          await appendBroadcastCoverage(channel, elapsed + GUIDE_WINDOW_SECONDS);
+          position = locateChannelSegment(channel, elapsed);
         }
-        resetChannelShuffle(channel);
-        await initializeChannelBroadcast(channel);
-        if (channel.error) throw new Error(channel.error);
-        releaseChannelRestore(channel);
+        if (!position) throw new Error('No current programme could be located.');
+
+        const preserveThrough = Math.max(position.index, channelProgramGroupEnd(channel.queue, position.index));
+        const reshuffled = shuffleChannelScheduleTail(channel.queue, preserveThrough, channel.shows);
+        channel.queue = reshuffled.queue;
+        channel.nextSequence = reshuffled.nextSequence;
+        channel.nextProgrammeSequence = reshuffled.nextProgrammeSequence;
+        const recentLimit = Math.min(8, Math.max(0, (channel.commercials || []).length - 1));
+        const recentCommercialPaths = [];
+        for (const item of channel.queue) {
+          if (item.segmentType !== 'commercial' || !item.path) continue;
+          const previous = recentCommercialPaths.indexOf(item.path);
+          if (previous >= 0) recentCommercialPaths.splice(previous, 1);
+          recentCommercialPaths.push(item.path);
+          if (recentLimit && recentCommercialPaths.length > recentLimit) recentCommercialPaths.shift();
+        }
+        channel.rotation = {
+          ...(channel.rotation || {}),
+          lastShowPath: reshuffled.lastShowPath || channel.rotation?.lastShowPath || '',
+          lastCommercialPath: reshuffled.lastCommercialPath || channel.rotation?.lastCommercialPath || '',
+          commercialBagPaths: [],
+          recentCommercialPaths: recentLimit ? recentCommercialPaths : []
+        };
         persistChannels();
         completed += 1;
       } catch (error) {
         failed.push(channel.name);
         console.error(`Channel shuffle failed for ${channel.name}`, error);
-      } finally {
-        if (selectedInput === 'tv' && activeChannelId === channel.id) startActiveChannel();
       }
     }
     channelShuffleStatus = failed.length
       ? `SHUFFLED ${completed} / ${ordered.length} · FAILED: ${failed.join(', ')} · CHECK CHANNELS AND RETRY`
-      : `SHUFFLED ${completed} CHANNEL${completed === 1 ? '' : 'S'} + COMMERCIALS`;
+      : `SHUFFLED ${completed} CHANNEL${completed === 1 ? '' : 'S'} · CURRENT PROGRAMMES LEFT ON AIR`;
     setStatus(channelShuffleStatus);
   })().catch(error => {
     console.error('TV channel shuffle stopped', error);
@@ -4621,6 +4806,7 @@ async function shuffleAllChannels() {
   }).finally(() => {
     channelRefreshPromise = null;
     renderChannels();
+    renderPlaylist();
     renderTVGuide();
   });
   return channelRefreshPromise;
@@ -6124,6 +6310,7 @@ document.querySelector('#audioRcaButton').addEventListener('click', () => { sele
 for (const button of document.querySelectorAll('[data-settings-tab]')) button.addEventListener('click', () => selectSettingsTab(button.dataset.settingsTab));
 window.addEventListener('resize', () => { updateInterfaceScale(); for (const dialog of [tvGuideDialog, tvSettingsDialog]) setScreenDialogBounds(dialog); });
 rescanChannelButton.addEventListener('click', () => { void rescanActiveChannel(); });
+channelShuffleButton.addEventListener('click', () => { void shuffleAllChannels(); });
 soundEffectsToggle.addEventListener('click', () => {
   soundEffectsEnabled = !soundEffectsEnabled;
   syncSoundControls();

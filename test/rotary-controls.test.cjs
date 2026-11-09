@@ -10,6 +10,7 @@ const renderer = readFileSync(path.join(root, 'renderer.js'), 'utf8');
 const css = readFileSync(path.join(root, 'styles.css'), 'utf8');
 const main = readFileSync(path.join(root, 'main.cjs'), 'utf8');
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 const preload = readFileSync(path.join(root, 'preload.cjs'), 'utf8');
 const shelfStorage = readFileSync(path.join(root, 'shelf-storage.cjs'), 'utf8');
 const appIdentity = readFileSync(path.join(root, 'app-identity.cjs'), 'utf8');
@@ -99,8 +100,10 @@ test('playback, captions, saved playlists, and preferences retain the historical
   assert.match(main, /MIN_FREE_DISK_BYTES = 8 \* 1024 \*\* 3/);
 });
 
-test('release metadata targets the next 0.8 patch and keeps the ARM build path', () => {
-  assert.equal(pkg.version, '0.8.6');
+test('release metadata stays version-consistent and keeps the ARM build path', () => {
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].version, pkg.version);
   assert.match(pkg.scripts['package:mac'], /build-package/);
   const build = readFileSync(path.join(root, 'build-package.mjs'), 'utf8');
   assert.match(build, /arm64/);

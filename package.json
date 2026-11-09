@@ -1,11 +1,12 @@
 {
   "name": "saturday-tube-electron",
   "productName": "Saturday Tube",
-  "version": "0.8.6",
+  "version": "0.8.8",
   "description": "A cozy local video player with a CRT picture",
   "main": "main.cjs",
   "private": true,
   "scripts": {
+    "dev:console": "node tools/dev-console.mjs",
     "dev": "electron .",
     "start": "node ./start.js",
     "test": "node --test",
@@ -14,7 +15,7 @@
     "package:release:mac": "node build-package.mjs --release"
   },
   "engines": {
-    "node": ">=22.12.0 <23"
+    "node": ">=22.12.0"
   },
   "devDependencies": {
     "electron": "45.0.0",

@@ -31,8 +31,67 @@ test('TV channel tools are integrated and input changes apply without a transiti
   assert.doesNotMatch(renderer, /Promise\.all\(channels\.map\(async channel => \{[\s\S]*?scanChannel\(channel\)/);
 });
 
+test('Settings has a distinct, non-interrupting shuffle action for all channel lineups', () => {
+  const tools = html.match(/<div class="channel-tools">([\s\S]*?)<\/div>/)?.[1] || '';
+  assert.match(tools, /id="rescanChannelButton"[^>]*>↻ REFRESH/);
+  assert.match(tools, /id="channelShuffleButton"[^>]*>⤨ SHUFFLE LINEUPS/);
+  assert.match(html, /id="channelShuffleStatus"[^>]*role="status"/);
+  assert.match(renderer, /channelShuffleButton\.addEventListener\('click', \(\) => \{ void shuffleAllChannels\(\); \}\)/);
+  const shuffle = renderer.match(/async function shuffleAllChannels\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(shuffle, /shuffleChannelScheduleTail/);
+  assert.match(shuffle, /channelProgramGroupEnd/);
+  assert.doesNotMatch(shuffle, /clearChannelVideoForInputChange|resetChannelShuffle|startActiveChannel|channelTuneToken/,
+    'shuffling never resets the active video or starts a fresh broadcast');
+  assert.match(renderer, /function updateGuideShuffleControls\(\) \{[\s\S]*?channelShuffleButton\.disabled = unavailable/);
+});
+
+test('shuffle preserves the on-air episode, randomizes series, and keeps each series ordered', () => {
+  const groupEnd = renderer.match(/function channelProgramGroupEnd\(queue, currentIndex\) \{[\s\S]*?\n\}/)?.[0] || '';
+  const numbered = renderer.match(/function channelEpisodeIsNumbered\(item\) \{[\s\S]*?\n\}/)?.[0] || '';
+  const shuffleItems = renderer.match(/function shuffleChannelItems\(items, random = Math\.random\) \{[\s\S]*?\n\}/)?.[0] || '';
+  const poolCycles = renderer.match(/function shuffleChannelPoolCycles\(groups, random = Math\.random\) \{[\s\S]*?\n\}/)?.[0] || '';
+  const shuffleTail = renderer.match(/function shuffleChannelScheduleTail\(queue, preserveThroughIndex, shows = \[\], random = Math\.random\) \{[\s\S]*?\n\}/)?.[0] || '';
+  assert.ok(groupEnd && numbered && shuffleItems && poolCycles && shuffleTail, 'shuffle queue helpers exist');
+  const helpers = vm.runInNewContext(`${groupEnd}\n${numbered}\n${shuffleItems}\n${poolCycles}\n${shuffleTail}; ({ channelProgramGroupEnd, shuffleChannelScheduleTail })`);
+  const queue = [
+    { segmentType: 'program', path: '/tv/A/S01E01a.mp4', showPath: '/tv/A', programSequence: 10, sequence: 1 },
+    { segmentType: 'commercial', path: '/ads/ad1.mp4', programSequence: 10, breakSequence: 2, sequence: 2 },
+    { segmentType: 'program', path: '/tv/A/S01E01b.mp4', showPath: '/tv/A', programSequence: 10, sequence: 3 },
+    { segmentType: 'commercial', path: '/ads/ad2.mp4', programSequence: 10, breakSequence: 4, sequence: 4 },
+    { segmentType: 'program', path: '/tv/A/S01E02.mp4', showPath: '/tv/A', programSequence: 11, sequence: 5 },
+    { segmentType: 'commercial', path: '/ads/ad3.mp4', programSequence: 11, breakSequence: 6, sequence: 6 },
+    { segmentType: 'program', path: '/tv/B/S01E01.mp4', showPath: '/tv/B', programSequence: 12, sequence: 7 },
+    { segmentType: 'program', path: '/tv/A/S01E03.mp4', showPath: '/tv/A', programSequence: 13, sequence: 8 },
+    ...['Alpha', 'Beta', 'Gamma', 'Alpha', 'Beta', 'Gamma'].map((name, index) => ({
+      segmentType: 'program', path: `/tv/Loose/${name}.mp4`, showPath: '/tv/Loose', programSequence: 14 + index, sequence: 9 + index
+    }))
+  ];
+  const preserveThrough = helpers.channelProgramGroupEnd(queue, 2);
+  assert.equal(preserveThrough, 3, 'preserves every part and the full break for the airing episode');
+  assert.equal(helpers.channelProgramGroupEnd(queue, 1), 3, 'shuffling during an ad break leaves that programme intact');
+  const shows = [
+    { path: '/tv/A', episodes: [{ path: '/tv/A/S01E01.mp4' }, { path: '/tv/A/S01E02.mp4' }, { path: '/tv/A/S01E03.mp4' }] },
+    { path: '/tv/B', episodes: [{ path: '/tv/B/S01E01.mp4' }] },
+    { path: '/tv/Loose', loose: true, episodes: ['Alpha', 'Beta', 'Gamma'].map(name => ({ path: `/tv/Loose/${name}.mp4` })) }
+  ];
+  const result = helpers.shuffleChannelScheduleTail(queue, preserveThrough, shows, () => 0);
+  assert.ok(result.queue.slice(0, 4).every((item, index) => item === queue[index]), 'the current episode and ad break stay untouched');
+  const programs = result.queue.slice(4).filter(item => item.segmentType === 'program');
+  const aEpisodes = programs.filter(item => item.showPath === '/tv/A').map(item => item.path);
+  assert.deepEqual(JSON.parse(JSON.stringify(aEpisodes)), ['/tv/A/S01E02.mp4', '/tv/A/S01E03.mp4'], 'series episodes remain in order');
+  const looseEpisodes = programs.filter(item => item.showPath === '/tv/Loose').map(item => item.path);
+  assert.deepEqual(new Set(JSON.parse(JSON.stringify(looseEpisodes.slice(0, 3)))), new Set(['Alpha', 'Beta', 'Gamma'].map(name => `/tv/Loose/${name}.mp4`)),
+    'loose movie/video pools still use every title once before the next cycle');
+  assert.notDeepEqual(programs.map(item => item.path), queue.slice(4).filter(item => item.segmentType === 'program').map(item => item.path),
+    'the future lineup is actually shuffled');
+  const tailSequences = JSON.parse(JSON.stringify(result.queue.slice(4).map(item => item.sequence)));
+  assert.deepEqual(tailSequences, [...tailSequences].sort((a, b) => a - b), 'reordered items keep sequence IDs monotonic');
+  assert.equal(result.nextSequence, result.queue.at(-1).sequence + 1);
+  assert.equal(result.nextProgrammeSequence, result.queue.at(-1).programSequence);
+});
+
 test('commercials are channel-scoped with no shared WATCH-folder watcher', () => {
-  assert.doesNotMatch(main, /COMMERCIAL_SOURCE_ROOT|\/Volumes\/BIGGERDRIVE\/WATCH\/Commercials/);
+  assert.doesNotMatch(main, /COMMERCIAL_SOURCE_ROOT/);
   assert.doesNotMatch(main, /commercialService\.startWatchingFolder\(/);
   assert.match(main, /importChannelCommercialSources\(/);
 });

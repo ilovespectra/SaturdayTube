@@ -208,3 +208,18 @@ Channel playback takes priority over optional drive analysis. Common MP4/MOV/Web
 Automatic break-point analysis is deferred while TV or VCR playback is selected, and resumes on SAT. Previously analysed cuts remain available; unanalysed breaks retain their planned timing. Upcoming-file checks wait for five uninterrupted seconds of playback and scan completion. The screen and remote distinguish reading channel files, rebuilding schedules, loading video, and buffering; a small `UPDATING CHANNELS` count remains visible while other channels prepare. Sustained loading uses an animated neutral picture instead of a frozen shot of the previous programme.
 
 The main process writes `launch.log` under Electron's `userData` folder. It restores window bounds before construction and shows the window only after the renderer restores preferences, arranges the controls, initializes the picture, and signals presentation readiness. This avoids flashing default finishes and intermediate layouts before the CRT power-on animation. Renderer load/console errors remain logged, and a visible fallback page appears on a load failure or if presentation is not ready within 12 seconds, including when the HTML loads but renderer initialization fails.
+
+## Shuffle Channel Lineups
+
+In Settings → Channels, **⤨ SHUFFLE LINEUPS** shuffles upcoming series and loose programmes across every channel without interrupting the programmes already on air. Episodes within each series remain in season/episode order, and movies do not repeat until the eligible pool is exhausted. **↻ REFRESH** remains the separate action for rebuilding playlists and finding changes on disk.
+
+## Developer Console
+
+Run `npm run dev:console` to execute the real test-and-package workflow. It runs
+`npm test`, bumps the patch version, then packages an isolated **Saturday Tube
+Candidate** app (separate bundle ID/profile) into `dist/candidates/`; it never
+installs over the regular app. Set `SATURDAY_TUBE_BUILD_OUTPUT` to stage the
+candidate elsewhere. This is local-only: official GitHub release publishing,
+website downloads, and in-app update feeds are not wired yet, and this console
+will not publish them. GitHub permissions—not a hidden owner flag—must protect
+any future official publishing workflow.

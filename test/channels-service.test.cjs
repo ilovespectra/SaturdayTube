@@ -176,6 +176,54 @@ test('long programs receive shuffled breaks before 15 minutes and resume within 
   assert.ok(current.segment.sourceStartSeconds + current.offsetSeconds < 2500);
 });
 
+test('ad-free movies stay whole, shuffle once per pool, and restore the saved position', () => {
+  const movies = ['Zulu', 'Alpha', 'Delta', 'Bravo'].map(name => ({
+    name,
+    path: `/tv/HBO/${name}`,
+    episodes: [{ path: `/tv/HBO/${name}/${name}.mp4`, durationSeconds: 4800 }]
+  }));
+  const random = makeRandom(27);
+  const first = createBroadcastSchedule(movies, [], {}, 0, random);
+  const firstPrograms = first.queue.filter(item => item.segmentType === 'program');
+  const firstOrder = firstPrograms.map(item => item.path);
+  assert.equal(firstPrograms.length, movies.length, 'an ad-free film is one schedule item, not repeated 14-minute slices');
+  assert.equal(new Set(firstOrder).size, movies.length, 'each eligible movie airs once before the pool is exhausted');
+  assert.notDeepEqual(firstOrder, movies.map(show => show.episodes[0].path), 'movie order is shuffled, not alphabetical');
+
+  const rotation = Object.fromEntries([
+    'round', 'episodeOrderVersion', 'episodeBags', 'lastEpisodeByShow', 'lastShowPath',
+    'lastCommercialPath', 'commercialBagPaths', 'recentCommercialPaths'
+  ].map(key => [key, first[key]]));
+  const saved = {
+    rotation,
+    queue: firstPrograms.map((item, index) => ({
+      path: item.path, segmentType: item.segmentType, durationSeconds: item.durationSeconds,
+      sourceStartSeconds: item.sourceStartSeconds, sequence: index + 1, programSequence: index + 1
+    })),
+    elapsedSeconds: 4800 + 123
+  };
+  const restored = reconcileChannelPlayback(movies, [], saved);
+  assert.deepEqual(restored.queue.map(item => item.path), firstOrder, 'restart preserves the saved shuffled queue');
+  const current = locateBroadcastSegment(restored.queue, restored.elapsedSeconds);
+  assert.equal(current.segment.path, firstOrder[1], 'restart resumes the right movie');
+  assert.equal(current.offsetSeconds, 123, 'restart preserves the movie offset');
+
+  const legacyQueue = Array.from({ length: 6 }, (_, index) => ({
+    path: firstOrder[0], segmentType: 'program', sourceStartSeconds: index * 840,
+    durationSeconds: Math.min(840, 4800 - index * 840), sequence: index + 1, programSequence: 1
+  }));
+  const migrated = reconcileChannelPlayback(movies, [], { queue: legacyQueue, elapsedSeconds: 840 + 123 });
+  assert.equal(migrated.queue.length, 1, 'restart folds old ad-free 14-minute slices back into one title');
+  assert.equal(migrated.queue[0].durationSeconds, 4800);
+  assert.equal(locateBroadcastSegment(migrated.queue, migrated.elapsedSeconds).offsetSeconds, 840 + 123,
+    'migration preserves the exact source position');
+
+  const next = createBroadcastSchedule(movies, [], restored.rotation, 0, random);
+  const nextOrder = next.queue.filter(item => item.segmentType === 'program').map(item => item.path);
+  assert.equal(new Set(nextOrder).size, movies.length, 'the next cycle also uses every movie once');
+  assert.notEqual(nextOrder[0], firstOrder.at(-1), 'a new pool cycle does not repeat its boundary movie');
+});
+
 test('short TV episodes get a scaled mid-roll and an episode-end break', () => {
   const shows = [
     { name: 'Short A', path: '/tv/A', episodes: [{ path: '/tv/A/1.mp4', durationSeconds: 480 }] },

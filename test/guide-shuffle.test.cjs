@@ -9,10 +9,14 @@ const pick = name => source.match(new RegExp(`(?:async )?function ${name}\\([^\\
 
 function harness(overrides = {}) {
   const channel = (id, extra = {}) => ({
-    id, name: id, scanComplete: true, shows: [], commercials: [], error: '',
-    queue: [{ segmentType: 'program', showPath: 'show', path: `${id}-old` }],
-    rotation: { commercialBagPaths: ['old-ad'], episodeBags: { show: ['old-episode'] } },
-    playHistory: { old: 1 }, broadcast: {}, savedPlaybackState: { old: true },
+    id, name: id, scanComplete: true, shows: [{ path: `show-${id}`, episodes: [{ path: `${id}-current` }, { path: `${id}-next` }] }], commercials: [], error: '',
+    queue: [
+      { segmentType: 'program', showPath: `show-${id}`, path: `${id}-current`, programSequence: 1, sequence: 1, durationSeconds: 10 },
+      { segmentType: 'commercial', path: `${id}-ad`, programSequence: 1, breakSequence: 2, sequence: 2, durationSeconds: 5 },
+      { segmentType: 'program', showPath: `show-${id}`, path: `${id}-next`, programSequence: 2, sequence: 3, durationSeconds: 10 }
+    ],
+    rotation: { commercialBagPaths: ['old-ad'], episodeBags: { [`show-${id}`]: ['old-episode'] } },
+    playHistory: { old: 1 }, broadcast: { startedAtMs: 1000, initialOffsetSeconds: 0, totalDurationSeconds: 25 }, savedPlaybackState: { old: true },
     ...extra
   });
   const nodes = new Map();
@@ -22,54 +26,64 @@ function harness(overrides = {}) {
     channels, channelsStartupReady: true, channelRefreshPromise: null, channelShuffleStatus: '',
     activeChannelId: 'one', selectedInput: 'tv', channelTuneToken: 0,
     activeChannel() { return channels.find(channel => channel.id === context.activeChannelId); },
-    locateChannelSegment() { return null; }, broadcastElapsed() { return 0; },
+    channelShuffleButton: { disabled: false, textContent: '' },
+    channelShuffleStatusOutput: { textContent: '' },
     document: { querySelector(id) {
       if (!nodes.has(id)) nodes.set(id, {});
       return nodes.get(id);
     } },
     console: { error(...args) { calls.push(['error', args[0]]); } },
     renderChannels() { context.updateGuideShuffleControls(); },
+    renderPlaylist() { calls.push(['playlist']); },
     renderTVGuide() { context.updateGuideShuffleControls(); },
-    clearChannelVideoForInputChange() { calls.push(['clear', context.activeChannelId]); },
-    setTVSearching(value) { calls.push(['search', value]); },
     setStatus(value) { calls.push(['status', value]); },
-    releaseChannelRestore() {},
     persistChannels() { calls.push(['save']); },
-    startActiveChannel() { calls.push(['tune', context.activeChannelId]); },
-    async scanChannel(channel) { calls.push(['scan', channel.id]); channel.scanComplete = true; },
-    async initializeChannelBroadcast(channel) {
-      calls.push(['build', channel.id]);
-      assert.equal(channel.broadcast, null);
-      assert.equal(channel.queue.length, 0);
-      assert.equal(channel.rotation.commercialBagPaths, undefined, 'old commercial bag is discarded');
-      assert.equal(channel.rotation.episodeBags, undefined, 'old show bags are discarded');
-      assert.equal(Object.keys(channel.playHistory).length, 0);
-      channel.queue = [{ segmentType: 'program', path: `${channel.id}-new` }, { segmentType: 'commercial', path: 'new-ad' }];
-      channel.broadcast = {};
+    isCurrentChannelPlayback() { return false; },
+    channelPlaybackSnapshot(channel) { return { elapsedSeconds: 0, queue: channel.queue }; },
+    locateChannelSegment(channel, elapsed) {
+      let startSeconds = 0;
+      for (let index = 0; index < channel.queue.length; index += 1) {
+        const item = channel.queue[index];
+        if (elapsed < startSeconds + item.durationSeconds) return { index, segment: item };
+        startSeconds += item.durationSeconds;
+      }
+      return null;
     },
+    broadcastElapsed() { return 0; },
+    async appendBroadcastCoverage() {},
+    async scanChannel(channel) { calls.push(['scan', channel.id]); channel.scanComplete = true; },
     ...overrides
   };
   vm.createContext(context);
-  vm.runInContext(['unwrapChannelSchedule', 'resetChannelShuffle', 'updateGuideShuffleControls', 'shuffleAllChannels'].map(pick).join('\n'), context);
+  vm.runInContext(['channelProgramGroupEnd', 'channelEpisodeIsNumbered', 'shuffleChannelItems', 'shuffleChannelPoolCycles',
+    'shuffleChannelScheduleTail', 'updateGuideShuffleControls', 'shuffleAllChannels'].map(pick).join('\n'), context);
   return { context, calls, nodes, run: () => context.shuffleAllChannels() };
 }
 
-test('Guide exposes global shuffle with progress and uses cached catalogues for all channels, including disabled ones', async () => {
+test('Guide and Settings shuffle all channel lineups without interrupting current playback', async () => {
   assert.match(html, /id="tvGuideShuffle"[^>]*>SHUFFLE ALL/);
   assert.match(html, /id="tvGuideShuffleStatus"[^>]*aria-live="polite"/);
+  assert.match(html, /id="channelShuffleButton"[^>]*>⤨ SHUFFLE LINEUPS/);
   assert.match(source, /'#tvGuideShuffle'\)\.addEventListener\('click', \(\) => \{ void shuffleAllChannels\(\); \}\)/);
+  assert.match(source, /channelShuffleButton\.addEventListener\('click', \(\) => \{ void shuffleAllChannels\(\); \}\)/);
   assert.doesNotMatch(pick('shuffleAllChannels'), /rescanChannelFolder|force: true|discoverNewChannels/);
   const { context, calls, nodes, run } = harness();
   await run();
-  assert.deepEqual(calls.filter(call => call[0] === 'build'), [['build', 'one'], ['build', 'two']]);
   assert.equal(calls.some(call => call[0] === 'scan'), false);
-  assert.deepEqual(calls.filter(call => call[0] === 'tune'), [['tune', 'one']]);
+  assert.equal(calls.some(call => ['clear', 'tune'].includes(call[0])), false, 'shuffle does not restart or retune playback');
   assert.equal(calls.filter(call => call[0] === 'save').length, 2);
   assert.equal(context.channels[1].enabled, false);
   assert.equal(context.channels[1].adFree, true);
   assert.deepEqual(context.channels[1].disabledShowPaths, ['excluded']);
-  assert.equal(nodes.get('#tvGuideShuffleStatus').textContent, 'SHUFFLED 2 CHANNELS + COMMERCIALS');
+  assert.equal(nodes.get('#tvGuideShuffleStatus').textContent, 'SHUFFLED 2 CHANNELS · CURRENT PROGRAMMES LEFT ON AIR');
   assert.equal(nodes.get('#tvGuideShuffle').disabled, false);
+  assert.equal(context.channelShuffleButton.disabled, false);
+  assert.match(context.channelShuffleStatusOutput.textContent, /CURRENT PROGRAMMES LEFT ON AIR/);
+  assert.equal(context.channels[0].queue[0].path, 'one-current');
+  assert.equal(context.channels[1].queue[0].path, 'two-current');
+  assert.equal(context.channels[0].broadcast.startedAtMs, 1000, 'current channel clock stays in place');
+  assert.deepEqual(context.channels[0].savedPlaybackState, { old: true }, 'saved playback state is preserved');
+  assert.deepEqual(context.channels[0].rotation.episodeBags, { 'show-one': ['old-episode'] }, 'per-channel episode progress stays independent');
   assert.equal(context.channelRefreshPromise, null);
 });
 
@@ -81,14 +95,14 @@ test('shuffle waits for existing queue work and prevents a second shuffle or ref
   await new Promise(resolve => setImmediate(resolve));
   assert.ok(context.channelRefreshPromise);
   assert.equal(nodes.get('#tvGuideShuffle').disabled, true);
+  assert.equal(context.channelShuffleButton.disabled, true);
   assert.equal(nodes.get('#tvGuideAdd').disabled, true);
   assert.equal(nodes.get('#tvGuideShuffle').textContent, 'SHUFFLING…');
   assert.match(nodes.get('#tvGuideShuffleStatus').textContent, /SHUFFLING 1 \/ 2/);
   await run();
-  assert.equal(calls.some(call => call[0] === 'build'), false);
   release();
   await pending;
-  assert.equal(calls.filter(call => call[0] === 'build').length, 2);
+  assert.equal(calls.some(call => call[0] === 'build'), false);
 });
 
 test('shuffle scans only unfinished catalogues and reports individual failures while continuing other channels', async () => {
@@ -97,12 +111,12 @@ test('shuffle scans only unfinished catalogues and reports individual failures w
   context.channels[1].scanComplete = false;
   await run();
   assert.deepEqual(calls.filter(call => call[0] === 'scan'), [['scan', 'two']]);
-  assert.deepEqual(calls.filter(call => call[0] === 'build'), [['build', 'two']]);
+  assert.equal(context.channels[1].queue[0].path, 'two-current');
   assert.equal(calls.some(call => call[0] === 'clear' || call[0] === 'tune'), false, 'another input is not interrupted');
   assert.equal(calls.filter(call => call[0] === 'error').length, 1);
   assert.match(nodes.get('#tvGuideShuffleStatus').textContent, /SHUFFLED 1 \/ 2 · FAILED: one/);
   assert.equal(nodes.get('#tvGuideShuffle').disabled, false);
-  assert.equal(context.channels[0].queue[0].path, 'one-old', 'offline channel keeps its saved schedule');
+  assert.equal(context.channels[0].queue[0].path, 'one-current', 'offline channel keeps its saved schedule');
 });
 
 test('shuffle respects startup, refresh and outstanding Guide-edit locks', async () => {

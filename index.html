@@ -63,7 +63,9 @@
                 <button id="chooseChannelSourceButton" type="button" title="Choose the folder that holds all your channel folders" aria-label="Set channel source folder">SET CHANNEL SOURCE…</button>
                 <button id="addChannelButton" type="button" title="Choose a single channel folder" aria-label="Add a channel folder">＋ ADD ONE CHANNEL</button>
                 <button id="rescanChannelButton" type="button" title="Rebuild every channel's saved playlists from its folder and look for new channels" aria-label="Refresh channel playlists" disabled>↻ REFRESH</button>
+                <button id="channelShuffleButton" type="button" title="Shuffle upcoming series, episodes in order, movies and programmes on every channel without interrupting what's on" aria-label="Shuffle all channel lineups" disabled>⤨ SHUFFLE LINEUPS</button>
               </div>
+              <output id="channelShuffleStatus" class="channel-shuffle-status" role="status" aria-live="polite"></output>
               <div id="channelSourcePath" class="channel-root-path">No channel source set · every folder inside it becomes a channel.</div>
               <div id="channelStatus" class="channel-status-line" aria-live="polite">NO CHANNELS SET UP</div>
               <div id="channelRootPath" class="channel-root-path">Each channel folder holds show subfolders or loose videos; a Commercials folder is optional.</div>

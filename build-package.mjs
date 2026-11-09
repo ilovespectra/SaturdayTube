@@ -46,7 +46,7 @@ try {
     // Ad-hoc signing seals the renamed app on this Mac without a Developer ID.
     osxSign: { identity: '-', identityValidation: false, optionsForFile: optionsForSignedApp },
     osxNotarize: false,
-    ignore: [/node_modules/, /package-lock[.]json$/, /build-package.*[.](?:cjs|mjs)$/, /(^|[\\/])test([\\/]|$)/, /(^|[\\/])dist([\\/]|$)/, /(^|[\\/])tools([\\/]|$)/, /(^|[\\/])README[.]md$/, /vendor[\\/]ffmpeg([\\/]|$)/]
+    ignore: [/node_modules/, /package-lock[.]json$/, /build-package.*[.](?:cjs|mjs)$/, /(^|[\\/])test([\\/]|$)/, /(^|[\\/])dist([\\/]|$)/, /(^|[\\/])tools([\\/]|$)/, /(^|[\\/])README[.]md$/, /(^|[\\/])relocate[.]sh$/, /vendor[\\/]ffmpeg([\\/]|$)/, /(^|[\\/])(?:\.vscode|\.vercel|saturday-tube-site|user-data|userData|profiles|browser-profile[^\\/]*|recordings|downloads|exports)([\\/]|$)/, /(^|[\\/])\.env(?:\..*)?$/, /(^|[\\/])[^\\/]+\.(?:pem|key|p12|p8|mobileprovision|cer|sqlite3?|db|db-wal|db-shm|jsonl)$/i, /(^|[\\/])\.DS_Store$/]
   });
   for (const p of paths) console.log(path.resolve(p));
 } catch (error) {

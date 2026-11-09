@@ -1,4 +1,33 @@
+# Dependencies and generated builds
 node_modules/
 dist/
+build/
+release/
 *.log
 .DS_Store
+relocate.sh
+**/.vercel/
+
+# Local credentials, user profiles, and private media/state
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
+*.mobileprovision
+*.cer
+*.keychain-db
+browser-profile*/
+user-data/
+userData/
+profiles/
+downloads/
+recordings/
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.jsonl

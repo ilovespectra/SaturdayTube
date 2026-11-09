@@ -145,9 +145,10 @@ test('ad-free reconciliation removes ads without moving the programme source pos
     { path: '/episode', segmentType: 'program', durationSeconds: 50, sourceStartSeconds: 50 }
   ];
   const restored = reconcileChannelPlayback(shows, [], { queue, elapsedSeconds: 80 });
-  assert.equal(restored.queue.length, 2);
+  assert.equal(restored.queue.length, 1, 'an ad-free channel rejoins adjacent pieces of the same programme');
+  assert.equal(restored.queue[0].durationSeconds, 100);
   assert.equal(restored.elapsedSeconds, 60);
-  assert.equal(restored.queue[1].sourceStartSeconds + restored.elapsedSeconds - 50, 60);
+  assert.equal(restored.queue[0].sourceStartSeconds + restored.elapsedSeconds, 60);
   const inAd = reconcileChannelPlayback(shows, [], { queue, elapsedSeconds: 60 });
   assert.equal(inAd.elapsedSeconds, 50, 'an on-air commercial skips to the next programme segment');
   assert.equal(reconcileChannelPlayback(shows, commercials, { queue, elapsedSeconds: 80 }).queue.length, 3);

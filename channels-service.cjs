@@ -249,7 +249,11 @@ function createBroadcastSchedule(shows, commercials, previousState = {}, minimum
       const programDuration = Number(episode.durationSeconds);
       if (!(programDuration > 0)) continue;
       programGroupIndex += 1;
-      const regularSegmentCount = Math.max(1, Math.ceil(programDuration / MAX_CHANNEL_UNINTERRUPTED_PROGRAM_SECONDS));
+      // A no-ad schedule has no mid-roll boundaries; keep each title as one item instead of
+      // making long films appear as many repeated entries and reopening the same media.
+      const regularSegmentCount = hasCommercials
+        ? Math.max(1, Math.ceil(programDuration / MAX_CHANNEL_UNINTERRUPTED_PROGRAM_SECONDS))
+        : 1;
       // Episodes of eight minutes or more keep a mid-roll; shorter programmes (music videos, shorts) air whole.
       const segmentCount = hasCommercials && programDuration >= MIN_MIDROLL_PROGRAM_SECONDS ? Math.max(2, regularSegmentCount) : regularSegmentCount;
       let sourceStartSeconds = 0;
@@ -358,6 +362,23 @@ function randomBroadcastOffset(totalDurationSeconds, random = Math.random) {
 const MAX_CHANNEL_QUEUE_ENTRIES = 6000;
 const SAVED_BREAK_CUT_KINDS = new Set(['black', 'silence', 'lull', 'nominal']);
 const MAX_CHANNEL_PLAY_HISTORY = 1000;
+function coalesceAdjacentProgramSegments(queue) {
+  const result = [];
+  for (const item of queue) {
+    const previous = result.at(-1);
+    const previousEnd = (Number(previous?.sourceStartSeconds) || 0) + (Number(previous?.durationSeconds) || 0);
+    const sourceStart = Math.max(0, Number(item?.sourceStartSeconds) || 0);
+    if (previous?.segmentType === 'program' && item?.segmentType === 'program'
+      && previous.path === item.path && Math.abs(previousEnd - sourceStart) < 0.05) {
+      previous.durationSeconds += Math.max(0, Number(item.durationSeconds) || 0);
+      previous.endCutKind = item.endCutKind;
+      previous.cutVersion = Math.max(Number(previous.cutVersion) || 0, Number(item.cutVersion) || 0);
+      continue;
+    }
+    result.push({ ...item });
+  }
+  return result;
+}
 function reconcileChannelPlayback(shows, commercials, savedState = {}) {
   const mediaByPath = new Map();
   for (const show of Array.isArray(shows) ? shows : []) {
@@ -465,9 +486,12 @@ function reconcileChannelPlayback(shows, commercials, savedState = {}) {
     lastPlayedAt: Math.max(0, Number(entry.lastPlayedAt) || 0),
     segmentType: entry.segmentType === 'commercial' ? 'commercial' : 'program'
   }]));
-  const totalDurationSeconds = restoredQueue.reduce((sum, item) => sum + Number(item.durationSeconds || 0), 0);
+  const hasCommercials = (Array.isArray(commercials) ? commercials : [])
+    .some(item => typeof item?.path === 'string' && Number(item.durationSeconds) >= 2.5);
+  const queue = hasCommercials ? restoredQueue : coalesceAdjacentProgramSegments(restoredQueue);
+  const totalDurationSeconds = queue.reduce((sum, item) => sum + Number(item.durationSeconds || 0), 0);
   return {
-    queue: restoredQueue,
+    queue,
     elapsedSeconds: Math.max(0, Number(elapsedSeconds) || 0),
     totalDurationSeconds,
     rotation: savedState?.rotation && typeof savedState.rotation === 'object' ? savedState.rotation : {},
