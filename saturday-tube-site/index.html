@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#17110d">
+  <meta name="description" content="A local-first macOS video player for your own videos. Build channels, browse a tape shelf, and tune a 1990s CRT picture. Version 0.8.8 is a local candidate, not a public download.">
+  <link rel="icon" type="image/png" href="assets/SaturdayTube.png">
+  <title>Saturday Tube — Your tapes. Your channels. Your TV.</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --night: #17110d;
+      --deep: #211710;
+      --brown: #352218;
+      --wood: #754522;
+      --wood-light: #a76e3a;
+      --cream: #f5e8cd;
+      --muted: #c2ad8d;
+      --brass: #d6b46d;
+      --mint: #c4e398;
+      --glow: #b8e777;
+      --line: #846346;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --round: 18px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--cream);
+      background:
+        radial-gradient(ellipse at 50% -12%, #68432666, transparent 49rem),
+        radial-gradient(ellipse at 84% 45%, #3c251533, transparent 35rem),
+        var(--night);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+    a { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    .wrap { width: min(1120px, calc(100% - 48px)); margin-inline: auto; }
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between; gap: 28px;
+      padding: 24px 0 19px; border-bottom: 1px solid #ffffff12;
+    }
+    .brand { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; }
+    .brand-mark {
+      display: block; flex: 0 0 auto; width: 46px; height: 46px; object-fit: cover;
+      border: 1px solid #d2ac73aa; border-radius: 12px;
+      background: #302116; box-shadow: 0 4px 13px #0007;
+    }
+    .brand-copy { display: grid; line-height: 1.05; }
+    .brand-copy strong { font-size: 15px; letter-spacing: .12em; text-transform: uppercase; }
+    .brand-copy small { margin-top: 5px; color: var(--muted); font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    nav { display: flex; align-items: center; gap: 29px; color: #d2c3aa; font-size: 13px; }
+    nav a { text-decoration: none; transition: color .18s ease; }
+    nav a:hover { color: var(--mint); }
+    .nav-cta { padding: 9px 15px; border: 1px solid #957448; border-radius: 999px; color: var(--cream); background: #63402555; }
+    .hero {
+      display: grid; grid-template-columns: 1fr .92fr; align-items: center; gap: clamp(34px, 6vw, 80px);
+      min-height: 590px; padding: 58px 0 68px;
+    }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; color: var(--mint); font: 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--mint); box-shadow: 0 0 7px var(--mint); }
+    h1 { max-width: 620px; margin: 17px 0 18px; font-size: clamp(46px, 6.6vw, 78px); line-height: .99; letter-spacing: -.065em; font-weight: 730; }
+    h1 span { color: var(--brass); }
+    .hero-copy { max-width: 510px; margin: 0; color: #d2c2a7; font-size: clamp(16px, 1.7vw, 18px); }
+    .hero-copy em { color: var(--cream); font-style: normal; }
+    .hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 13px; margin-top: 29px; }
+    .button {
+      display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+      min-height: 49px; padding: 0 20px; border: 1px solid transparent; border-radius: 999px;
+      color: #182012; background: linear-gradient(180deg, #d1eca2, #a7cf73);
+      box-shadow: 0 7px 22px #b9e77722, inset 0 1px #f6ffdc;
+      font-size: 14px; font-weight: 760; text-decoration: none; transition: transform .18s, filter .18s;
+    }
+    .button:hover:not([aria-disabled="true"]) { transform: translateY(-2px); filter: brightness(1.08); }
+    .button[aria-disabled="true"] { cursor: not-allowed; color: #d1c4aa; background: #ffffff0a; border-color: #ffffff1e; box-shadow: none; }
+    .button .arrow { font-size: 18px; line-height: 1; }
+    .text-link { color: #dbc9a8; font-size: 13px; text-decoration-color: #dbc9a855; text-underline-offset: 4px; }
+    .hero-note { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: #a9987e; font: 11px var(--mono); }
+    .hero-note::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--brass); box-shadow: 0 0 8px #d6b46d77; }
+    .hero-art { position: relative; display: grid; place-items: center; min-height: 390px; isolation: isolate; }
+    .hero-art::before { content: ""; position: absolute; z-index: -1; width: 78%; aspect-ratio: 1; border-radius: 50%; background: #a76e3a1c; filter: blur(56px); }
+    .room-art {
+      position: absolute; z-index: -1; inset: 4px; overflow: hidden; border: 1px solid #ddbb7755; border-radius: 22px;
+      background: linear-gradient(135deg, #17110d66, #17110d2e 58%, #17110d66), url("assets/kids-room.jpg") center 54% / cover no-repeat;
+      box-shadow: inset 0 0 55px #100b0877, 0 18px 40px #0004;
+    }
+    .art-credit { position: absolute; top: 12px; left: 14px; padding: 5px 8px; border: 1px solid #e2c9874d; border-radius: 999px; color: #ead7b1; background: #17110dbd; font: 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; text-shadow: 0 1px 5px #000; }
+    .tv {
+      position: relative; width: min(100%, 440px); padding: 20px 22px 18px; border: 1px solid #d8ad7066; border-radius: 40px 40px 34px 34px;
+      background:
+        repeating-linear-gradient(2deg, transparent 0 14px, #26140817 15px 17px),
+        linear-gradient(104deg, #69401f, #a56e38 13%, #784a27 37%, #9a6434 68%, #69401f);
+      box-shadow: 0 38px 76px #0009, inset 0 2px #ffe4b344, inset 0 -8px 16px #281407aa, 0 9px 0 #29180f;
+      transform: rotate(1deg);
+    }
+    .tv::before, .tv::after { content: ""; position: absolute; top: -22px; width: 3px; height: 34px; border-radius: 3px; background: linear-gradient(#b8b8a6, #4b4b46); transform-origin: bottom; }
+    .tv::before { left: calc(50% - 9px); transform: rotate(-25deg); }
+    .tv::after { left: calc(50% + 5px); transform: rotate(24deg); }
+    .tv-bezel { padding: 12px; border: 1px solid #e9ca8a44; border-radius: 27px; background: linear-gradient(145deg, #2b2017, #19130f 74%); box-shadow: inset 0 0 0 3px #080706, inset 0 3px 12px #000c, 0 2px 0 #f5d49a33; }
+    .screen {
+      position: relative; display: flex; flex-direction: column; justify-content: space-between; min-height: 238px; overflow: hidden;
+      padding: 20px 21px; border: 1px solid #a3a78a33; border-radius: 16% / 12%; color: #d5f0a5;
+      background: radial-gradient(ellipse at 49% 46%, #273d2c 0, #14251b 42%, #070c09 100%);
+      box-shadow: inset 0 0 34px #020604, 0 0 24px #91c7721c;
+      text-shadow: 0 0 8px #b6df85bb;
+    }
+    .screen::before { content: ""; position: absolute; inset: 0; opacity: .24; pointer-events: none; background: repeating-linear-gradient(0deg, transparent 0 3px, #000 4px 5px); }
+    .screen::after { content: ""; position: absolute; inset: -30%; pointer-events: none; background: linear-gradient(112deg, transparent 37%, #ffffff12 48%, transparent 59%); transform: rotate(-5deg); }
+    .screen-meta, .screen-foot { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 12px; font: 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .screen-center { position: relative; z-index: 1; text-align: center; }
+    .screen-center small { display: block; margin-bottom: 10px; color: #a3c886; font: 10px var(--mono); letter-spacing: .25em; text-transform: uppercase; }
+    .screen-center strong { display: block; font: clamp(28px, 4vw, 42px)/.9 var(--mono); letter-spacing: -.08em; }
+    .screen-center span { display: block; margin-top: 14px; color: #c2e994; font: 11px var(--mono); letter-spacing: .14em; }
+    .tv-controls { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 19px 7px 0; }
+    .tv-brand { color: #f0d5a7; font-size: 10px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
+    .tv-dials { display: flex; align-items: center; gap: 10px; }
+    .tv-dials i { width: 26px; height: 26px; border: 2px solid #d7b77d; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #967147, #422615); box-shadow: inset 0 1px 3px #ffebac66, 0 2px 3px #27140b; }
+    .tv-dials i:last-child { width: 17px; height: 17px; }
+    .tv-legs { position: absolute; bottom: -25px; left: 12%; right: 12%; display: flex; justify-content: space-between; }
+    .tv-legs i { width: 20px; height: 30px; border-radius: 0 0 4px 4px; background: linear-gradient(90deg, #4c2e1b, #8b5b31, #432516); transform: skewX(-8deg); }
+    .tv-legs i:last-child { transform: skewX(8deg); }
+    .floor-shadow { position: absolute; z-index: -1; bottom: 7px; width: 88%; height: 26px; border-radius: 50%; background: #0009; filter: blur(13px); }
+    .stamp { position: absolute; right: -14px; bottom: 20px; display: grid; place-items: center; width: 83px; height: 83px; border: 1px solid #e2c98788; border-radius: 50%; color: #f5deaa; background: #49301edc; box-shadow: 0 7px 20px #0007; font: 10px/1.4 var(--mono); letter-spacing: .08em; text-align: center; text-transform: uppercase; transform: rotate(10deg); }
+    .ticker { display: flex; align-items: center; gap: 17px; padding: 13px 17px; border: 1px solid #ffffff12; border-radius: 10px; color: #b4a489; background: #ffffff05; font: 10px var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    .ticker .light { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--mint); box-shadow: 0 0 9px var(--mint); }
+    .ticker strong { color: #e1d1b1; font-weight: 500; }
+    section { scroll-margin-top: 24px; }
+    .releases { padding: 100px 0 92px; }
+    .section-head { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 25px; }
+    h2 { margin: 9px 0 0; font-size: clamp(30px, 4vw, 43px); line-height: 1.05; letter-spacing: -.045em; }
+    .section-intro { max-width: 400px; margin: 0; color: var(--muted); font-size: 13px; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+    .stat { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 16px 19px; border: 1px solid #ffffff16; border-radius: 14px; background: linear-gradient(130deg, #ffffff09, #ffffff03); }
+    .stat-label { color: #bca98b; font: 10px var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    .stat-value { color: #f3e5c9; font: 22px var(--mono); font-variant-numeric: tabular-nums; text-decoration: none; }
+    a.stat-value:hover { text-decoration: underline; }
+    .release-panel { overflow: hidden; border: 1px solid #8d6c46; border-radius: var(--round); background: linear-gradient(135deg, #342318, #241811 78%); box-shadow: 0 20px 48px #0003; }
+    .release-top { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 19px 22px; border-bottom: 1px solid #ffffff16; }
+    .release-top strong { font: 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .feed-badge { display: inline-flex; align-items: center; gap: 8px; color: #b6d795; font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .feed-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+    .feed-badge[data-state="error"] { color: #e2ad7e; }
+    .release-content { padding: 22px; }
+    .latest-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px 28px; }
+    .release-label { margin: 0 0 6px; color: var(--brass); font: 10px var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+    .release-version { margin: 0; font-size: clamp(23px, 3.2vw, 33px); line-height: 1.1; letter-spacing: -.04em; }
+    .release-meta { display: flex; flex-wrap: wrap; gap: 7px 17px; margin-top: 9px; color: #bba88a; font: 11px var(--mono); }
+    .release-description { max-width: 650px; margin: 16px 0 0; color: #d0bea0; font-size: 13px; white-space: pre-line; }
+    .release-download { grid-row: 1 / span 3; grid-column: 2; min-width: 195px; text-align: center; }
+    .asset-list { display: grid; gap: 9px; margin-top: 23px; }
+    .asset-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 11px 13px; border: 1px solid #ffffff13; border-radius: 10px; background: #08060428; }
+    .asset-name { min-width: 0; overflow: hidden; color: #e9dbc0; font: 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .asset-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 14px; color: #b9a788; font: 10px var(--mono); }
+    .asset-actions a { color: var(--mint); text-decoration: none; }
+    .asset-actions a:hover { text-decoration: underline; }
+    .empty-feed { display: grid; grid-template-columns: 42px 1fr; align-items: start; gap: 14px; padding: 21px; border: 1px dashed #9b774c88; border-radius: 12px; background: #16100c88; }
+    .empty-icon { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid #b88c52; border-radius: 12px; color: var(--brass); font: 21px var(--mono); }
+    .empty-feed strong { display: block; margin-bottom: 4px; color: #f0e1c4; font-size: 14px; }
+    .empty-feed p { max-width: 680px; margin: 0; color: #bda98b; font-size: 12px; }
+    .release-list-wrap { margin-top: 23px; }
+    .list-heading { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 10px; color: #b6a181; font: 10px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .release-list { display: grid; gap: 8px; }
+    .release-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid #ffffff12; border-radius: 10px; background: #ffffff04; text-decoration: none; transition: border-color .16s, background .16s; }
+    .release-row:hover { border-color: #b69a6477; background: #ffffff09; }
+    .release-row strong { display: block; overflow: hidden; color: #e7d7b9; font: 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .release-row small { display: block; margin-top: 4px; color: #9e8d73; font: 10px var(--mono); }
+    .row-downloads { color: #cbb897; font: 11px var(--mono); white-space: nowrap; }
+    .row-arrow { color: var(--mint); font-size: 17px; }
+    .features { padding: 4px 0 104px; }
+    .features .section-head { margin-bottom: 28px; }
+    .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .feature { min-height: 185px; padding: 23px; border: 1px solid #ffffff13; border-radius: 15px; background: linear-gradient(145deg, #ffffff08, #ffffff02); }
+    .feature-icon { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 18px; border: 1px solid #b28a5555; border-radius: 10px; color: var(--mint); background: #b3da7920; font: 17px var(--mono); }
+    .feature h3 { margin: 0 0 8px; color: #f0e1c6; font-size: 16px; letter-spacing: -.02em; }
+    .feature p { margin: 0; color: #b9a88b; font-size: 12px; }
+    .download-note { margin-top: 15px; color: #a89577; font: 10px/1.6 var(--mono); }
+    footer { display: flex; justify-content: space-between; gap: 22px; padding: 23px 0 32px; border-top: 1px solid #ffffff12; color: #a9977a; font: 10px var(--mono); }
+    footer a { color: #c8b690; text-decoration-color: #c8b69055; text-underline-offset: 3px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (max-width: 760px) {
+      .wrap { width: min(100% - 34px, 580px); }
+      .topbar { padding: 17px 0; }
+      nav { gap: 16px; }
+      nav a:not(.nav-cta) { display: none; }
+      .hero { grid-template-columns: 1fr; gap: 21px; min-height: auto; padding: 54px 0 40px; }
+      .hero-copy { max-width: 550px; }
+      .hero-art { min-height: 335px; margin: 0 8px; }
+      .tv { width: min(100%, 410px); }
+      .screen { min-height: 205px; }
+      .stamp { right: -8px; bottom: 5px; width: 72px; height: 72px; font-size: 9px; }
+      .releases { padding: 76px 0 78px; }
+      .section-head { align-items: start; flex-direction: column; gap: 13px; }
+      .section-intro { max-width: 540px; }
+      .release-download { min-width: 155px; }
+    }
+    @media (max-width: 520px) {
+      .wrap { width: calc(100% - 28px); }
+      .brand-copy strong { font-size: 13px; }
+      .brand-copy small { font-size: 9px; }
+      .brand-mark { width: 40px; height: 40px; border-radius: 10px; }
+      .nav-cta { padding: 8px 11px; font-size: 11px; }
+      h1 { font-size: clamp(43px, 13vw, 60px); }
+      .hero { padding-top: 44px; }
+      .hero-art { min-height: 280px; }
+      .tv { padding: 14px 14px 14px; border-radius: 30px; }
+      .tv-bezel { padding: 8px; border-radius: 20px; }
+      .screen { min-height: 176px; padding: 15px; }
+      .screen-center strong { font-size: 30px; }
+      .tv-controls { padding-top: 14px; }
+      .tv-dials { gap: 7px; }
+      .tv-dials i { width: 23px; height: 23px; }
+      .stamp { right: -7px; bottom: -3px; }
+      .ticker { align-items: flex-start; font-size: 9px; }
+      .stats { gap: 8px; }
+      .stat { align-items: flex-start; flex-direction: column; gap: 7px; padding: 13px; }
+      .stat-value { font-size: 19px; }
+      .release-top { padding: 15px; }
+      .release-content { padding: 15px; }
+      .latest-grid { grid-template-columns: 1fr; gap: 15px; }
+      .release-download { grid-row: auto; grid-column: auto; justify-self: start; min-width: 0; }
+      .release-description { margin-top: 11px; }
+      .asset-row { align-items: flex-start; flex-direction: column; gap: 7px; }
+      .asset-name { max-width: 100%; }
+      .asset-actions { width: 100%; justify-content: space-between; }
+      .release-row { grid-template-columns: minmax(0, 1fr) auto; gap: 9px; }
+      .row-downloads { grid-row: 2; grid-column: 1; }
+      .row-arrow { grid-row: 1 / span 2; grid-column: 2; }
+      .feature-grid { grid-template-columns: 1fr; }
+      .feature { min-height: 0; }
+      footer { flex-direction: column; gap: 9px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap topbar">
+    <a class="brand" href="#top" aria-label="Saturday Tube home">
+      <img class="brand-mark" src="assets/SaturdayTube.png" alt="">
+      <span class="brand-copy"><strong>Saturday Tube</strong><small>Home video club</small></span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#features">The experience</a>
+      <a href="#releases">Releases</a>
+      <a class="nav-cta" href="#releases">Release status <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="wrap hero" aria-labelledby="hero-title">
+      <div>
+        <span class="eyebrow">A little analog, a lot of yours</span>
+        <h1 id="hero-title">Your tapes.<br><span>Your channels.</span><br>Your TV.</h1>
+        <p class="hero-copy">A local-first macOS player for your own videos: build channels, browse a tape shelf, and tune a 1990s CRT picture. Version 0.8.8 fixes repeating movies and adds Shuffle Lineups.</p>
+        <div class="hero-actions">
+          <a class="button" id="heroDownload" href="#releases" aria-disabled="true"><span class="arrow" aria-hidden="true">↓</span><span id="heroDownloadText">See release status</span></a>
+          <a class="text-link" href="#features">Take a look around</a>
+        </div>
+        <div class="hero-note">macOS 13+ · Apple silicon · 0.8.8 candidate, not publicly downloadable</div>
+      </div>
+      <div class="hero-art" role="img" aria-label="A retro television illustration over official Saturday Tube in-app room artwork">
+        <div class="room-art" aria-hidden="true"></div>
+        <div class="tv">
+          <div class="tv-bezel">
+            <div class="screen">
+              <div class="screen-meta"><span>Local broadcast</span><span>CH 07</span></div>
+              <div class="screen-center"><small>Now showing</small><strong>SATURDAY<br>TUBE</strong><span>YOUR OWN LITTLE TV</span></div>
+              <div class="screen-foot"><span>VHS · TV · STREAM</span><span>◉ ON AIR</span></div>
+            </div>
+          </div>
+          <div class="tv-controls"><span class="tv-brand">Saturday Tube</span><span class="tv-dials" aria-hidden="true"><i></i><i></i><i></i></span></div>
+          <span class="tv-legs" aria-hidden="true"><i></i><i></i></span>
+        </div>
+        <span class="floor-shadow" aria-hidden="true"></span>
+        <span class="stamp" aria-hidden="true">Tuned to<br>your time</span>
+        <span class="art-credit" aria-hidden="true">Saturday Tube · in-app room art</span>
+      </div>
+    </section>
+
+    <div class="wrap ticker" aria-label="App highlights"><span class="light" aria-hidden="true"></span><strong>Local video library</strong><span>·</span><strong>Custom channels</strong><span>·</span><strong>CRT picture effects</strong><span>·</span><strong>Your remote, your rules</strong></div>
+
+    <section class="wrap releases" id="releases" aria-labelledby="release-title">
+      <div class="section-head">
+        <div><span class="eyebrow">Fresh from the release shelf</span><h2 id="release-title">Tune in to the latest.</h2></div>
+        <p class="section-intro">The 0.8.8 movie-repeat and Shuffle Lineups fixes are tested. This local candidate is not a public download; no public release or in-app updater feed is available yet.</p>
+      </div>
+      <div class="stats" aria-label="Download totals">
+        <div class="stat"><span class="stat-label">Installer downloads · all releases</span><a class="stat-value" id="allDownloads" href="https://github.com/ilovespectra/saturday-tube-2/releases" target="_blank" rel="noopener noreferrer">Checking…</a></div>
+        <div class="stat"><span class="stat-label">Latest release installer downloads</span><strong class="stat-value" id="latestDownloads">—</strong></div>
+      </div>
+      <div class="release-panel">
+        <div class="release-top"><strong>Release monitor</strong><span class="feed-badge" id="feedBadge" data-state="loading">Checking GitHub</span></div>
+        <div class="release-content">
+          <div class="empty-feed" id="feedMessage" role="status" aria-live="polite">
+            <span class="empty-icon" aria-hidden="true">↻</span>
+            <div><strong>Checking public release availability</strong><p>Version 0.8.8 is a tested local candidate, not a public download. No version or download count is shown unless GitHub publishes release data.</p></div>
+          </div>
+          <div id="releaseDetails" hidden>
+            <div class="latest-grid">
+              <div><p class="release-label">Latest stable release</p><h3 class="release-version" id="latestVersion"></h3><div class="release-meta"><span id="latestDate"></span><span id="latestAssetSummary"></span></div></div>
+              <a class="button release-download" id="latestDownload" target="_blank" rel="noopener noreferrer"><span class="arrow" aria-hidden="true">↓</span><span id="latestDownloadText">Download for Mac</span></a>
+              <p class="release-description" id="latestDescription"></p>
+            </div>
+            <div class="asset-list" id="assetList" aria-label="Latest release files"></div>
+          </div>
+          <div class="release-list-wrap" id="releaseListWrap" hidden>
+            <p class="list-heading"><span>Release history</span><span>Asset downloads</span></p>
+            <div class="release-list" id="releaseList"></div>
+          </div>
+        </div>
+      </div>
+      <p class="download-note">Counts are the download totals GitHub reports for release assets—not page visits or unique people. GitHub does not expose private releases on this page.</p>
+    </section>
+
+    <section class="wrap features" id="features" aria-labelledby="features-title">
+      <div class="section-head"><div><span class="eyebrow">Make it a Saturday</span><h2 id="features-title">A familiar set, made yours.</h2></div><p class="section-intro">A thoughtfully local player for the video you already love—wrapped in a cabinet that feels like home.</p></div>
+      <div class="feature-grid">
+        <article class="feature"><span class="feature-icon" aria-hidden="true">▤</span><h3>Bring your own tapes</h3><p>Import video into your shelf, or point channels at your own folders. Your channel-source files stay where you put them.</p></article>
+        <article class="feature"><span class="feature-icon" aria-hidden="true">◉</span><h3>Dial in your picture</h3><p>Shape the CRT with scanlines, curvature, VHS tracking and other picture effects. Pick a cabinet finish that feels right.</p></article>
+        <article class="feature"><span class="feature-icon" aria-hidden="true">⌁</span><h3>Shuffle without repeats</h3><p>Movies and other loose channel videos don’t repeat until that pool is exhausted. Shuffle Lineups reshuffles upcoming programmes across channels without changing episode order within a series.</p></article>
+      </div>
+      <p class="download-note">YouTube is optional and uses its official embedded player. Sign-in, availability and advertising remain under YouTube’s control.</p>
+    </section>
+  </main>
+
+  <footer class="wrap"><span>Saturday Tube · Made for slow Saturdays.</span><span>Release data by <a href="https://docs.github.com/en/rest/releases/releases" target="_blank" rel="noopener noreferrer">GitHub Releases API</a></span></footer>
+
+  <script>
+    (() => {
+      const repository = 'ilovespectra/saturday-tube-2';
+      const api = `https://api.github.com/repos/${repository}`;
+      const number = value => new Intl.NumberFormat('en-US').format(value || 0);
+      const date = value => {
+        if (!value) return 'Date unavailable';
+        return new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(value));
+      };
+      const el = id => document.getElementById(id);
+      const setStatus = (text, state) => { el('feedBadge').textContent = text; el('feedBadge').dataset.state = state; };
+      const showMessage = (title, message, icon = 'i') => {
+        el('feedMessage').hidden = false;
+        el('feedMessage').querySelector('.empty-icon').textContent = icon;
+        el('feedMessage').querySelector('strong').textContent = title;
+        el('feedMessage').querySelector('p').textContent = message;
+      };
+      const installerSuffixes = ['.dmg', '.pkg', '.zip', '.exe', '.msi', '.appimage', '.deb', '.rpm', '.tar.gz'];
+      const isInstaller = asset => installerSuffixes.some(suffix => (asset.name || '').toLowerCase().endsWith(suffix));
+      const assetCount = release => (release.assets || []).filter(isInstaller).reduce((sum, asset) => {
+        if (!Number.isSafeInteger(asset.download_count) || asset.download_count < 0) throw new Error('Invalid installer download total.');
+        return sum + asset.download_count;
+      }, 0);
+      const plainText = text => (text || '').replace(/```[\s\S]*?```/g, ' ').replace(/`([^`]+)`/g, '$1').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/[>*_~-]/g, ' ').replace(/\s+/g, ' ').trim();
+      async function getJson(url) {
+        const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+        if (!response.ok) { const error = new Error(`GitHub returned ${response.status}`); error.status = response.status; throw error; }
+        return response.json();
+      }
+      async function allReleases() {
+        const all = [];
+        for (let page = 1; ; page++) {
+          const batch = await getJson(`${api}/releases?per_page=100&page=${page}`);
+          all.push(...batch);
+          if (batch.length < 100) return all;
+        }
+      }
+      function renderAsset(asset) {
+        const row = document.createElement('div'); row.className = 'asset-row';
+        const name = document.createElement('span'); name.className = 'asset-name'; name.textContent = asset.name || 'Release file'; name.title = asset.name || '';
+        const actions = document.createElement('span'); actions.className = 'asset-actions';
+        const count = document.createElement('span'); count.textContent = `${number(asset.download_count)} downloads`;
+        actions.append(count);
+        if (asset.browser_download_url) {
+          const link = document.createElement('a'); link.href = asset.browser_download_url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = 'Download ↗'; actions.append(link);
+        }
+        row.append(name, actions); return row;
+      }
+      function renderHistory(releases, latestId) {
+        const rows = releases.filter(release => release.id !== latestId).slice(0, 5);
+        if (!rows.length) return;
+        const root = el('releaseList'); root.replaceChildren();
+        for (const release of rows) {
+          const link = document.createElement('a'); link.className = 'release-row'; link.href = release.html_url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          const heading = document.createElement('span');
+          const title = document.createElement('strong'); title.textContent = release.name || release.tag_name || 'Release';
+          const meta = document.createElement('small'); meta.textContent = `${date(release.published_at)}${release.prerelease ? ' · Pre-release' : ''}`;
+          heading.append(title, meta);
+          const downloads = document.createElement('span'); downloads.className = 'row-downloads'; downloads.textContent = `${number(assetCount(release))} downloads`;
+          const arrow = document.createElement('span'); arrow.className = 'row-arrow'; arrow.textContent = '↗'; arrow.setAttribute('aria-hidden', 'true');
+          link.append(heading, downloads, arrow); root.append(link);
+        }
+        el('releaseListWrap').hidden = false;
+      }
+      async function loadReleaseData() {
+        try {
+          const releases = (await allReleases()).filter(release => !release.draft);
+          const total = releases.reduce((sum, release) => sum + assetCount(release), 0);
+          el('allDownloads').textContent = number(total);
+          if (!releases.length) {
+            el('latestDownloads').textContent = '—';
+            showMessage('No public installer releases yet', 'The counter above is tied to Saturday Tube’s published GitHub release assets. Version 0.8.8 is a local candidate, not a public download.', '↗');
+            setStatus('No published releases', 'live');
+            return;
+          }
+          let latest = null;
+          try { latest = await getJson(`${api}/releases/latest`); }
+          catch (error) { if (error.status !== 404) throw error; }
+          if (!latest) {
+            el('latestDownloads').textContent = '—';
+            showMessage('No stable release yet', 'The total above includes installer assets from published releases. No stable release is available for the featured download.', '↗');
+            renderHistory(releases, null);
+            setStatus('No stable release', 'live');
+            return;
+          }
+          el('latestDownloads').textContent = number(assetCount(latest));
+          el('latestVersion').textContent = latest.name || latest.tag_name || 'Latest release';
+          el('latestDate').textContent = date(latest.published_at);
+          const assets = latest.assets || [];
+          el('latestAssetSummary').textContent = `${number(assets.length)} ${assets.length === 1 ? 'asset' : 'assets'}`;
+          el('latestDescription').textContent = plainText(latest.body) || 'Release notes are available on the GitHub release page.';
+          const downloadAssets = assets.filter(asset => asset.browser_download_url && /\.(dmg|pkg|zip)$/i.test(asset.name || ''));
+          const priority = asset => /\.dmg$/i.test(asset.name) ? 0 : /\.pkg$/i.test(asset.name) ? 1 : 2;
+          downloadAssets.sort((a, b) => priority(a) - priority(b));
+          const primary = downloadAssets[0];
+          const button = el('latestDownload');
+          if (primary) {
+            button.href = primary.browser_download_url;
+            el('latestDownloadText').textContent = `Download ${primary.name}`;
+            button.setAttribute('aria-label', `Download ${primary.name}`);
+            const hero = el('heroDownload'); hero.href = primary.browser_download_url; hero.target = '_blank'; hero.rel = 'noopener noreferrer'; hero.removeAttribute('aria-disabled');
+            el('heroDownloadText').textContent = `Download ${latest.tag_name || latest.name || 'latest'}`;
+          } else {
+            button.href = latest.html_url; button.target = '_blank'; button.rel = 'noopener noreferrer';
+            el('latestDownloadText').textContent = 'View release files';
+            const hero = el('heroDownload'); hero.href = latest.html_url; hero.target = '_blank'; hero.rel = 'noopener noreferrer'; hero.removeAttribute('aria-disabled');
+            el('heroDownloadText').textContent = `View ${latest.tag_name || 'latest release'}`;
+          }
+          const assetRoot = el('assetList'); assetRoot.replaceChildren(...assets.map(renderAsset));
+          el('feedMessage').hidden = true; el('releaseDetails').hidden = false;
+          renderHistory(releases, latest.id);
+          setStatus('Live from GitHub', 'live');
+        } catch (error) {
+          el('allDownloads').textContent = '—'; el('latestDownloads').textContent = '—';
+          showMessage('Could not verify the release count', 'GitHub did not return a complete public release list, so no total is guessed or cached. Check your connection and try refreshing.', '↻');
+          setStatus('Count unavailable', 'error');
+        }
+      }
+      loadReleaseData();
+    })();
+  </script>
+</body>
+</html>
