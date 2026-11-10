@@ -221,11 +221,4 @@ In Settings → Channels, **⤨ SHUFFLE LINEUPS** shuffles upcoming series and l
 
 ## Developer Console
 
-Run `npm run dev:console` to execute the real test-and-package workflow. It runs
-`npm test`, bumps the patch version, then packages an isolated **Saturday Tube
-Candidate** app (separate bundle ID/profile) into `dist/candidates/`; it never
-installs over the regular app. Set `SATURDAY_TUBE_BUILD_OUTPUT` to stage the
-candidate elsewhere. The console is local-only: it never creates GitHub tags or
-releases, uploads public packages, or deploys the website. Those steps happen
-separately after the console build has passed, with GitHub permissions protecting
-publishing access.
+Run `npm run dev:console -- next` to test and build the next version. When `gh` is authenticated as the owner of this repository, the console requires a clean, synchronized `main`, builds and verifies the release ZIP and SHA-256 sidecar, uses local Ollama (`qwen2.5:3b` by default) to summarize commit subjects, pushes the version bump to `main`, and creates a GitHub **draft** with both assets. It never publishes the draft. The current authenticated GitHub user must own `ilovespectra/saturday-tube-2`; collaborators and unauthenticated users get only an isolated **Saturday Tube Candidate** build. Use `--local-only` to force that path, or `--preflight` to check which path would run without building or changing anything; add `--notes-preview` to exercise Ollama without creating a release. `current` also stays local-only. Set `SATURDAY_TUBE_BUILD_OUTPUT` to choose an isolated build folder. The console refuses to overwrite an existing release tag or to release from a dirty/out-of-sync branch.
