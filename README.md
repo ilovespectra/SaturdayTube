@@ -2,9 +2,9 @@
 
 A local-first macOS video player for your own videos: build channels, browse a tape shelf, and shape a 1990s CRT picture.
 
-**0.8.8 candidate:** Movies shuffle without repeating until the pool is exhausted. **SHUFFLE ALL** reshuffles upcoming programmes across channels; episodes within a series stay in order.
+**0.8.9:** Movies shuffle without repeating until the pool is exhausted. **SHUFFLE ALL** reshuffles upcoming programmes across channels; episodes within a series stay in order.
 
-**Availability:** This repository is private. The tested 0.8.8 package is an ad-hoc-signed local candidate, not a public download; official releases and in-app updates are not available yet.
+**Availability:** The macOS package is published on [GitHub Releases](https://github.com/ilovespectra/saturday-tube-2/releases). It is ad-hoc-signed and not notarized, so macOS may show a security prompt.
 
 This Electron project is maintained separately from the legacy native C++/libmpv version.
 
@@ -225,7 +225,7 @@ Run `npm run dev:console` to execute the real test-and-package workflow. It runs
 `npm test`, bumps the patch version, then packages an isolated **Saturday Tube
 Candidate** app (separate bundle ID/profile) into `dist/candidates/`; it never
 installs over the regular app. Set `SATURDAY_TUBE_BUILD_OUTPUT` to stage the
-candidate elsewhere. This is local-only: official GitHub release publishing,
-website downloads, and in-app update feeds are not wired yet, and this console
-will not publish them. GitHub permissions—not a hidden owner flag—must protect
-any future official publishing workflow.
+candidate elsewhere. The console is local-only: it never creates GitHub tags or
+releases, uploads public packages, or deploys the website. Those steps happen
+separately after the console build has passed, with GitHub permissions protecting
+publishing access.

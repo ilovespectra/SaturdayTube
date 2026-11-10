@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#17110d">
-  <meta name="description" content="A local-first macOS video player for your own videos. Build channels, browse a tape shelf, and tune a 1990s CRT picture. Version 0.8.8 is a local candidate, not a public download.">
+  <meta name="description" content="A local-first macOS video player for your own videos. Build channels, browse a tape shelf, and tune a 1990s CRT picture. Latest release notes and downloads are read live from GitHub.">
   <link rel="icon" type="image/png" href="assets/SaturdayTube.png">
   <title>Saturday Tube — Your tapes. Your channels. Your TV.</title>
   <style>
@@ -256,12 +256,12 @@
       <div>
         <span class="eyebrow">A little analog, a lot of yours</span>
         <h1 id="hero-title">Your tapes.<br><span>Your channels.</span><br>Your TV.</h1>
-        <p class="hero-copy">A local-first macOS player for your own videos: build channels, browse a tape shelf, and tune a 1990s CRT picture. Version 0.8.8 fixes repeating movies and adds Shuffle Lineups.</p>
+        <p class="hero-copy">A local-first macOS player for your own videos: build channels, browse a tape shelf, and tune a 1990s CRT picture. Movies and loose videos shuffle without repeats; Shuffle Lineups reshuffles upcoming programmes while keeping episodes in order.</p>
         <div class="hero-actions">
           <a class="button" id="heroDownload" href="#releases" aria-disabled="true"><span class="arrow" aria-hidden="true">↓</span><span id="heroDownloadText">See release status</span></a>
           <a class="text-link" href="#features">Take a look around</a>
         </div>
-        <div class="hero-note">macOS 13+ · Apple silicon · 0.8.8 candidate, not publicly downloadable</div>
+        <div class="hero-note">macOS 13+ · Apple silicon · Latest release below</div>
       </div>
       <div class="hero-art" role="img" aria-label="A retro television illustration over official Saturday Tube in-app room artwork">
         <div class="room-art" aria-hidden="true"></div>
@@ -287,7 +287,7 @@
     <section class="wrap releases" id="releases" aria-labelledby="release-title">
       <div class="section-head">
         <div><span class="eyebrow">Fresh from the release shelf</span><h2 id="release-title">Tune in to the latest.</h2></div>
-        <p class="section-intro">The 0.8.8 movie-repeat and Shuffle Lineups fixes are tested. This local candidate is not a public download; no public release or in-app updater feed is available yet.</p>
+        <p class="section-intro">The latest macOS release, its notes, download links, and real installer counts load live from GitHub below.</p>
       </div>
       <div class="stats" aria-label="Download totals">
         <div class="stat"><span class="stat-label">Installer downloads · all releases</span><a class="stat-value" id="allDownloads" href="https://github.com/ilovespectra/saturday-tube-2/releases" target="_blank" rel="noopener noreferrer">Checking…</a></div>
@@ -298,7 +298,7 @@
         <div class="release-content">
           <div class="empty-feed" id="feedMessage" role="status" aria-live="polite">
             <span class="empty-icon" aria-hidden="true">↻</span>
-            <div><strong>Checking public release availability</strong><p>Version 0.8.8 is a tested local candidate, not a public download. No version or download count is shown unless GitHub publishes release data.</p></div>
+            <div><strong>Checking public release availability</strong><p>Release and download details are loading from GitHub. No numbers are guessed or cached.</p></div>
           </div>
           <div id="releaseDetails" hidden>
             <div class="latest-grid">
@@ -401,7 +401,7 @@
           el('allDownloads').textContent = number(total);
           if (!releases.length) {
             el('latestDownloads').textContent = '—';
-            showMessage('No public installer releases yet', 'The counter above is tied to Saturday Tube’s published GitHub release assets. Version 0.8.8 is a local candidate, not a public download.', '↗');
+            showMessage('No public installer releases yet', 'The counter totals downloads for published GitHub release assets. Version, notes, and files will appear here as soon as a stable release is available.', '↗');
             setStatus('No published releases', 'live');
             return;
           }

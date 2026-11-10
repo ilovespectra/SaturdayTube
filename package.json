@@ -1,7 +1,7 @@
 {
   "name": "saturday-tube-electron",
   "productName": "Saturday Tube",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "description": "A cozy local video player with a CRT picture",
   "main": "main.cjs",
   "private": true,
