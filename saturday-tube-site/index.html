@@ -136,7 +136,8 @@
     .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
     .stat { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 16px 19px; border: 1px solid #ffffff16; border-radius: 14px; background: linear-gradient(130deg, #ffffff09, #ffffff03); }
     .stat-label { color: #bca98b; font: 10px var(--mono); letter-spacing: .13em; text-transform: uppercase; }
-    .stat-value { color: #f3e5c9; font: 22px var(--mono); font-variant-numeric: tabular-nums; }
+    .stat-value { color: #f3e5c9; font: 22px var(--mono); font-variant-numeric: tabular-nums; text-decoration: none; }
+    a.stat-value:hover { text-decoration: underline; }
     .release-panel { overflow: hidden; border: 1px solid #8d6c46; border-radius: var(--round); background: linear-gradient(135deg, #342318, #241811 78%); box-shadow: 0 20px 48px #0003; }
     .release-top { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 19px 22px; border-bottom: 1px solid #ffffff16; }
     .release-top strong { font: 11px var(--mono); letter-spacing: .14em; text-transform: uppercase; }
@@ -289,8 +290,8 @@
         <p class="section-intro">The 0.8.8 movie-repeat and Shuffle Lineups fixes are tested. This local candidate is not a public download; no public release or in-app updater feed is available yet.</p>
       </div>
       <div class="stats" aria-label="Download totals">
-        <div class="stat"><span class="stat-label">Downloads · all releases</span><strong class="stat-value" id="allDownloads">—</strong></div>
-        <div class="stat"><span class="stat-label">Latest release assets</span><strong class="stat-value" id="latestDownloads">—</strong></div>
+        <div class="stat"><span class="stat-label">Installer downloads · all releases</span><a class="stat-value" id="allDownloads" href="https://github.com/ilovespectra/saturday-tube-2/releases" target="_blank" rel="noopener noreferrer">Checking…</a></div>
+        <div class="stat"><span class="stat-label">Latest release installer downloads</span><strong class="stat-value" id="latestDownloads">—</strong></div>
       </div>
       <div class="release-panel">
         <div class="release-top"><strong>Release monitor</strong><span class="feed-badge" id="feedBadge" data-state="loading">Checking GitHub</span></div>
@@ -346,7 +347,12 @@
         el('feedMessage').querySelector('strong').textContent = title;
         el('feedMessage').querySelector('p').textContent = message;
       };
-      const assetCount = release => (release.assets || []).reduce((sum, asset) => sum + (Number(asset.download_count) || 0), 0);
+      const installerSuffixes = ['.dmg', '.pkg', '.zip', '.exe', '.msi', '.appimage', '.deb', '.rpm', '.tar.gz'];
+      const isInstaller = asset => installerSuffixes.some(suffix => (asset.name || '').toLowerCase().endsWith(suffix));
+      const assetCount = release => (release.assets || []).filter(isInstaller).reduce((sum, asset) => {
+        if (!Number.isSafeInteger(asset.download_count) || asset.download_count < 0) throw new Error('Invalid installer download total.');
+        return sum + asset.download_count;
+      }, 0);
       const plainText = text => (text || '').replace(/```[\s\S]*?```/g, ' ').replace(/`([^`]+)`/g, '$1').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/[>*_~-]/g, ' ').replace(/\s+/g, ' ').trim();
       async function getJson(url) {
         const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
@@ -390,9 +396,25 @@
       }
       async function loadReleaseData() {
         try {
-          const [latest, releases] = await Promise.all([getJson(`${api}/releases/latest`), allReleases()]);
+          const releases = (await allReleases()).filter(release => !release.draft);
           const total = releases.reduce((sum, release) => sum + assetCount(release), 0);
           el('allDownloads').textContent = number(total);
+          if (!releases.length) {
+            el('latestDownloads').textContent = '—';
+            showMessage('No public installer releases yet', 'The counter above is tied to Saturday Tube’s published GitHub release assets. Version 0.8.8 is a local candidate, not a public download.', '↗');
+            setStatus('No published releases', 'live');
+            return;
+          }
+          let latest = null;
+          try { latest = await getJson(`${api}/releases/latest`); }
+          catch (error) { if (error.status !== 404) throw error; }
+          if (!latest) {
+            el('latestDownloads').textContent = '—';
+            showMessage('No stable release yet', 'The total above includes installer assets from published releases. No stable release is available for the featured download.', '↗');
+            renderHistory(releases, null);
+            setStatus('No stable release', 'live');
+            return;
+          }
           el('latestDownloads').textContent = number(assetCount(latest));
           el('latestVersion').textContent = latest.name || latest.tag_name || 'Latest release';
           el('latestDate').textContent = date(latest.published_at);
@@ -422,13 +444,8 @@
           setStatus('Live from GitHub', 'live');
         } catch (error) {
           el('allDownloads').textContent = '—'; el('latestDownloads').textContent = '—';
-          if (error.status === 404) {
-            showMessage('No public release feed yet', 'The source repository is private, so its releases are not available through GitHub’s public feed. Version 0.8.8 is a local candidate, not a public download.', '↗');
-            setStatus('Release feed unavailable', 'error');
-          } else {
-            showMessage('Could not reach GitHub right now', 'Release versions and download counts were not available, so none are guessed or cached here. Check your connection and try refreshing the page.', '↻');
-            setStatus('Feed temporarily offline', 'error');
-          }
+          showMessage('Could not verify the release count', 'GitHub did not return a complete public release list, so no total is guessed or cached. Check your connection and try refreshing.', '↻');
+          setStatus('Count unavailable', 'error');
         }
       }
       loadReleaseData();
