@@ -5,6 +5,11 @@
   "description": "A cozy local video player with a CRT picture",
   "main": "main.cjs",
   "private": true,
+  "homepage": "https://st.kolektivkrog.si/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilovespectra/SaturdayTube.git"
+  },
   "scripts": {
     "dev:console": "node tools/dev-console.mjs",
     "dev": "electron .",

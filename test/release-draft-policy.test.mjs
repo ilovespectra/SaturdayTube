@@ -2,17 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ownerReleaseTarget, parseGitHubRemote, selectOwnerVersion } from '../tools/release-draft-policy.mjs';
 
-test('parses HTTPS and SSH GitHub origin URLs', () => {
-  assert.deepEqual(parseGitHubRemote('https://github.com/ilovespectra/saturday-tube-2.git'), { owner: 'ilovespectra', repo: 'saturday-tube-2' });
-  assert.deepEqual(parseGitHubRemote('git@github.com:ilovespectra/saturday-tube-2.git'), { owner: 'ilovespectra', repo: 'saturday-tube-2' });
-  assert.equal(parseGitHubRemote('https://example.com/ilovespectra/saturday-tube-2'), null);
+test('parses canonical HTTPS and SSH GitHub origin URLs', () => {
+  assert.deepEqual(parseGitHubRemote('https://github.com/ilovespectra/SaturdayTube.git'), { owner: 'ilovespectra', repo: 'SaturdayTube' });
+  assert.deepEqual(parseGitHubRemote('git@github.com:ilovespectra/SaturdayTube.git'), { owner: 'ilovespectra', repo: 'SaturdayTube' });
+  assert.equal(parseGitHubRemote('https://example.com/ilovespectra/SaturdayTube'), null);
 });
 
-test('only the authenticated repository owner enters draft mode', () => {
-  const remote = 'https://github.com/ilovespectra/saturday-tube-2.git';
-  assert.deepEqual(ownerReleaseTarget('ilovespectra', remote), { owner: 'ilovespectra', repo: 'saturday-tube-2' });
-  assert.deepEqual(ownerReleaseTarget('ILOVESPECTRA', remote), { owner: 'ilovespectra', repo: 'saturday-tube-2' });
+test('only the authenticated owner of the canonical repository enters draft mode', () => {
+  const remote = 'https://github.com/ilovespectra/SaturdayTube.git';
+  assert.deepEqual(ownerReleaseTarget('ilovespectra', remote), { owner: 'ilovespectra', repo: 'SaturdayTube' });
+  assert.deepEqual(ownerReleaseTarget('ILOVESPECTRA', remote), { owner: 'ilovespectra', repo: 'SaturdayTube' });
   assert.equal(ownerReleaseTarget('collaborator', remote), null);
+  assert.equal(ownerReleaseTarget('ilovespectra', 'https://github.com/ilovespectra/saturday-tube-2.git'), null);
   assert.equal(ownerReleaseTarget('ilovespectra', 'https://github.com/ilovespectra/other-project'), null);
 });
 

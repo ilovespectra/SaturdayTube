@@ -4,7 +4,7 @@ A local-first macOS video player for your own videos: build channels, browse a t
 
 **0.8.9:** Movies shuffle without repeating until the pool is exhausted. **SHUFFLE ALL** reshuffles upcoming programmes across channels; episodes within a series stay in order.
 
-**Availability:** The macOS package is published on [GitHub Releases](https://github.com/ilovespectra/saturday-tube-2/releases). It is ad-hoc-signed and not notarized, so macOS may show a security prompt.
+**Availability:** Visit the [Saturday Tube site](https://st.kolektivkrog.si/) or the [GitHub Releases page](https://github.com/ilovespectra/SaturdayTube/releases). Packages are ad-hoc-signed and not notarized, so macOS may show a security prompt.
 
 This Electron project is maintained separately from the legacy native C++/libmpv version.
 
@@ -221,4 +221,4 @@ In Settings → Channels, **⤨ SHUFFLE LINEUPS** shuffles upcoming series and l
 
 ## Developer Console
 
-Run `npm run dev:console -- next` to test and build the next version. When `gh` is authenticated as the owner of this repository, the console requires a clean, synchronized `main`, builds and verifies the release ZIP and SHA-256 sidecar, uses local Ollama (`qwen2.5:3b` by default) to summarize commit subjects, pushes the version bump to `main`, and creates a GitHub **draft** with both assets. It never publishes the draft. The current authenticated GitHub user must own `ilovespectra/saturday-tube-2`; collaborators and unauthenticated users get only an isolated **Saturday Tube Candidate** build. Use `--local-only` to force that path, or `--preflight` to check which path would run without building or changing anything; add `--notes-preview` to exercise Ollama without creating a release. `current` also stays local-only. Set `SATURDAY_TUBE_BUILD_OUTPUT` to choose an isolated build folder. The console refuses to overwrite an existing release tag or to release from a dirty/out-of-sync branch.
+Run `npm run dev:console -- next` to test and build the next version. When `gh` is authenticated as the owner of this repository, the console requires a clean, synchronized `main`, builds and verifies the release ZIP and SHA-256 sidecar, uses local Ollama (`qwen2.5:3b` by default) to summarize commit subjects, pushes the version bump to `main`, and creates a GitHub **draft** with both assets. It never publishes the draft. The current authenticated GitHub user must own `ilovespectra/SaturdayTube`; collaborators and unauthenticated users get only an isolated **Saturday Tube Candidate** build. Use `--local-only` to force that path, or `--preflight` to check which path would run without building or changing anything; add `--notes-preview` to exercise Ollama without creating a release. `current` also stays local-only. Set `SATURDAY_TUBE_BUILD_OUTPUT` to choose an isolated build folder. The console refuses to overwrite an existing release tag or to release from a dirty/out-of-sync branch.

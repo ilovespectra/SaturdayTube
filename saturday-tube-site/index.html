@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#17110d">
   <meta name="description" content="A local-first macOS video player for your own videos. Build channels, browse a tape shelf, and tune a 1990s CRT picture. Latest release notes and downloads are read live from GitHub.">
+  <link rel="canonical" href="https://st.kolektivkrog.si/">
+  <meta property="og:url" content="https://st.kolektivkrog.si/">
   <link rel="icon" type="image/png" href="assets/SaturdayTube.png">
   <title>Saturday Tube — Your tapes. Your channels. Your TV.</title>
   <style>
@@ -290,7 +292,7 @@
         <p class="section-intro">The latest macOS release, its notes, download links, and real installer counts load live from GitHub below.</p>
       </div>
       <div class="stats" aria-label="Download totals">
-        <div class="stat"><span class="stat-label">Installer downloads · all releases</span><a class="stat-value" id="allDownloads" href="https://github.com/ilovespectra/saturday-tube-2/releases" target="_blank" rel="noopener noreferrer">Checking…</a></div>
+        <div class="stat"><span class="stat-label">Installer downloads · all releases</span><a class="stat-value" id="allDownloads" href="https://github.com/ilovespectra/SaturdayTube/releases" target="_blank" rel="noopener noreferrer">Checking…</a></div>
         <div class="stat"><span class="stat-label">Latest release installer downloads</span><strong class="stat-value" id="latestDownloads">—</strong></div>
       </div>
       <div class="release-panel">
@@ -332,7 +334,7 @@
 
   <script>
     (() => {
-      const repository = 'ilovespectra/saturday-tube-2';
+      const repository = 'ilovespectra/SaturdayTube';
       const api = `https://api.github.com/repos/${repository}`;
       const number = value => new Intl.NumberFormat('en-US').format(value || 0);
       const date = value => {

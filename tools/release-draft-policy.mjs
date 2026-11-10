@@ -5,7 +5,7 @@ export function parseGitHubRemote(value) {
   return match ? { owner: match[1], repo: match[2] } : null;
 }
 
-export function ownerReleaseTarget(login, remote, expected = { owner: 'ilovespectra', repo: 'saturday-tube-2' }) {
+export function ownerReleaseTarget(login, remote, expected = { owner: 'ilovespectra', repo: 'SaturdayTube' }) {
   const target = parseGitHubRemote(remote);
   if (!target || target.owner.toLowerCase() !== String(login).toLowerCase()) return null;
   if (target.owner.toLowerCase() !== expected.owner.toLowerCase() || target.repo.toLowerCase() !== expected.repo.toLowerCase()) return null;
