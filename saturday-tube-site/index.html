@@ -300,7 +300,7 @@
         <div class="release-content">
           <div class="empty-feed" id="feedMessage" role="status" aria-live="polite">
             <span class="empty-icon" aria-hidden="true">↻</span>
-            <div><strong>Checking public release availability</strong><p>Release and download details are loading from GitHub. No numbers are guessed or cached.</p></div>
+            <div><strong>Checking public release availability</strong><p>Release and download details load from GitHub. Recent responses may be cached briefly; no counts are guessed.</p></div>
           </div>
           <div id="releaseDetails" hidden>
             <div class="latest-grid">
@@ -356,15 +356,57 @@
         return sum + asset.download_count;
       }, 0);
       const plainText = text => (text || '').replace(/```[\s\S]*?```/g, ' ').replace(/`([^`]+)`/g, '$1').replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^#{1,6}\s+/gm, '').replace(/[>*_~-]/g, ' ').replace(/\s+/g, ' ').trim();
+      const cacheTtlMs = 5 * 60 * 1000;
+      const cacheAge = savedAt => {
+        const minutes = Math.max(0, Math.floor((Date.now() - savedAt) / 60000));
+        return minutes < 1 ? 'under a minute' : `${minutes} min`;
+      };
+      let usedCachedResponse = false;
+      let usedStaleCache = false;
+      let cachedAt = 0;
+      function readResponseCache(url) {
+        try {
+          const cached = JSON.parse(localStorage.getItem(`saturday-tube:github:${url}`) || 'null');
+          if (cached && Number.isFinite(cached.savedAt) && cached.savedAt > 0 && cached.savedAt <= Date.now()) return cached;
+        } catch {}
+        return null;
+      }
+      function saveResponseCache(url, data) {
+        try { localStorage.setItem(`saturday-tube:github:${url}`, JSON.stringify({data, savedAt:Date.now()})); } catch {}
+      }
+      function setResultStatus(message) {
+        if (usedStaleCache) setStatus(`${message} · cached ${cacheAge(cachedAt)} ago`, 'error');
+        else if (usedCachedResponse) setStatus(`Cached GitHub data · ${message}`, 'live');
+        else setStatus(message, 'live');
+      }
       async function getJson(url) {
-        const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
-        if (!response.ok) { const error = new Error(`GitHub returned ${response.status}`); error.status = response.status; throw error; }
-        return response.json();
+        const cached = readResponseCache(url);
+        if (cached && Date.now() - cached.savedAt < cacheTtlMs) {
+          usedCachedResponse = true;
+          cachedAt = Math.max(cachedAt, cached.savedAt);
+          return cached.data;
+        }
+        try {
+          const response = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } });
+          if (!response.ok) { const error = new Error(`GitHub returned ${response.status}`); error.status = response.status; throw error; }
+          const data = await response.json();
+          saveResponseCache(url, data);
+          return data;
+        } catch (error) {
+          if (cached) {
+            usedCachedResponse = true;
+            usedStaleCache = true;
+            cachedAt = cached.savedAt;
+            return cached.data;
+          }
+          throw error;
+        }
       }
       async function allReleases() {
         const all = [];
         for (let page = 1; ; page++) {
           const batch = await getJson(`${api}/releases?per_page=100&page=${page}`);
+          if (!Array.isArray(batch)) throw new Error('Invalid GitHub release list');
           all.push(...batch);
           if (batch.length < 100) return all;
         }
@@ -404,7 +446,7 @@
           if (!releases.length) {
             el('latestDownloads').textContent = '—';
             showMessage('No public installer releases yet', 'The counter totals downloads for published GitHub release assets. Version, notes, and files will appear here as soon as a stable release is available.', '↗');
-            setStatus('No published releases', 'live');
+            setResultStatus('No published releases');
             return;
           }
           let latest = null;
@@ -414,16 +456,17 @@
             el('latestDownloads').textContent = '—';
             showMessage('No stable release yet', 'The total above includes installer assets from published releases. No stable release is available for the featured download.', '↗');
             renderHistory(releases, null);
-            setStatus('No stable release', 'live');
+            setResultStatus('No stable release');
             return;
           }
           el('latestDownloads').textContent = number(assetCount(latest));
           el('latestVersion').textContent = latest.name || latest.tag_name || 'Latest release';
           el('latestDate').textContent = date(latest.published_at);
           const assets = latest.assets || [];
-          el('latestAssetSummary').textContent = `${number(assets.length)} ${assets.length === 1 ? 'asset' : 'assets'}`;
+          const installerAssets = assets.filter(isInstaller);
+          el('latestAssetSummary').textContent = `${number(installerAssets.length)} ${installerAssets.length === 1 ? 'installer' : 'installers'}`;
           el('latestDescription').textContent = plainText(latest.body) || 'Release notes are available on the GitHub release page.';
-          const downloadAssets = assets.filter(asset => asset.browser_download_url && /\.(dmg|pkg|zip)$/i.test(asset.name || ''));
+          const downloadAssets = installerAssets.filter(asset => asset.browser_download_url && /\.(dmg|pkg|zip)$/i.test(asset.name || ''));
           const priority = asset => /\.dmg$/i.test(asset.name) ? 0 : /\.pkg$/i.test(asset.name) ? 1 : 2;
           downloadAssets.sort((a, b) => priority(a) - priority(b));
           const primary = downloadAssets[0];
@@ -440,13 +483,13 @@
             const hero = el('heroDownload'); hero.href = latest.html_url; hero.target = '_blank'; hero.rel = 'noopener noreferrer'; hero.removeAttribute('aria-disabled');
             el('heroDownloadText').textContent = `View ${latest.tag_name || 'latest release'}`;
           }
-          const assetRoot = el('assetList'); assetRoot.replaceChildren(...assets.map(renderAsset));
+          const assetRoot = el('assetList'); assetRoot.replaceChildren(...installerAssets.map(renderAsset));
           el('feedMessage').hidden = true; el('releaseDetails').hidden = false;
           renderHistory(releases, latest.id);
-          setStatus('Live from GitHub', 'live');
+          setResultStatus('Release data ready');
         } catch (error) {
           el('allDownloads').textContent = '—'; el('latestDownloads').textContent = '—';
-          showMessage('Could not verify the release count', 'GitHub did not return a complete public release list, so no total is guessed or cached. Check your connection and try refreshing.', '↻');
+          showMessage('Could not verify the release count', 'GitHub did not return a complete public release list, so no total is guessed. Check your connection and try refreshing.', '↻');
           setStatus('Count unavailable', 'error');
         }
       }
